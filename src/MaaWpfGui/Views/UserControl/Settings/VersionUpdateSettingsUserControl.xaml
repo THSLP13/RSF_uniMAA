@@ -78,10 +78,13 @@
                         <controls:TooltipBlock TooltipText="{DynamicResource ForceGithubGlobalSourceTip}" />
                     </StackPanel>
                     <StackPanel Margin="8">
-                        <controls:TextBlock
-                            Margin="8,0,0,5"
-                            HorizontalAlignment="Left"
-                            Text="{DynamicResource UpdateCheck}" />
+                        <StackPanel Margin="0,0,0,5" Orientation="Horizontal">
+                            <controls:TextBlock
+                                Margin="8,0,0,0"
+                                HorizontalAlignment="Left"
+                                Text="{DynamicResource UpdateCheck}" />
+                            <controls:TooltipBlock TooltipMaxWidth="350" TooltipText="{DynamicResource UpdateCheckTip}" />
+                        </StackPanel>
                         <hc:ComboBox
                             Width="150"
                             HorizontalAlignment="Left"
@@ -110,7 +113,7 @@
                                 SelectedValue="{Binding UpdateSource}"
                                 SelectedValuePath="Value" />
                         </StackPanel>
-                        <StackPanel Margin="8">
+                        <StackPanel Margin="8" Visibility="{c:Binding 'UpdateSource == &quot;MirrorChyan&quot;'}">
                             <controls:TextBlock Margin="8,0,0,5" HorizontalAlignment="Left">
                                 <TextBlock.Text>
                                     <MultiBinding StringFormat="{}{0} CDK">
@@ -125,8 +128,6 @@
                                 </Grid.ColumnDefinitions>
                                 <hc:PasswordBox
                                     hc:BorderElement.CornerRadius="4,0,0,4"
-                                    hc:InfoElement.Placeholder="{Binding MirrorChyanCdkPlaceholder}"
-                                    IsEnabled="{c:Binding 'UpdateSource == &quot;MirrorChyan&quot;'}"
                                     IsSafeEnabled="False"
                                     ShowEyeButton="True"
                                     UnsafePassword="{Binding MirrorChyanCdk}" />

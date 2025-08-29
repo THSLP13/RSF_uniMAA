@@ -27,6 +27,7 @@ using System.Windows.Threading;
 using HandyControl.Controls;
 using JetBrains.Annotations;
 using MaaWpfGui.Constants;
+using MaaWpfGui.Extensions;
 using MaaWpfGui.Helper;
 using MaaWpfGui.Main;
 using MaaWpfGui.Models;
@@ -288,9 +289,9 @@ namespace MaaWpfGui.ViewModels.UI
 
         /// <summary>
         /// Starts calculation.
+        /// UI 绑定的方法
         /// </summary>
         /// <returns>Task</returns>
-        /// UI 绑定的方法
         [UsedImplicitly]
         public async Task RecruitStartCalc()
         {
@@ -494,9 +495,7 @@ namespace MaaWpfGui.ViewModels.UI
                     Name = ItemListHelper.GetItemName(id),
                     Image = ItemListHelper.GetItemImage(id),
                     Count = item["have"] != null && int.TryParse(item["have"]?.ToString() ?? "-1", out int haveValue)
-                        ? (haveValue > 10000
-                            ? $"{haveValue / 10000.0:F1}w"
-                            : haveValue.ToString())
+                        ? haveValue.FormatNumber(false)
                         : "-1",
                 };
 
@@ -520,8 +519,8 @@ namespace MaaWpfGui.ViewModels.UI
 
         /// <summary>
         /// Export depot info to ArkPlanner.
-        /// </summary>
         /// UI 绑定的方法
+        /// </summary>
         [UsedImplicitly]
         public void ExportToArkplanner()
         {
@@ -532,8 +531,8 @@ namespace MaaWpfGui.ViewModels.UI
 
         /// <summary>
         /// Export depot info to Lolicon.
-        /// </summary>
         /// UI 绑定的方法
+        /// </summary>
         [UsedImplicitly]
         public void ExportToLolicon()
         {
@@ -551,9 +550,9 @@ namespace MaaWpfGui.ViewModels.UI
 
         /// <summary>
         /// Starts depot recognition.
+        /// UI 绑定的方法
         /// </summary>
         /// <returns>Task</returns>
-        /// UI 绑定的方法
         [UsedImplicitly]
         public async Task StartDepot()
         {
@@ -616,10 +615,13 @@ namespace MaaWpfGui.ViewModels.UI
 
         public class Operator(string id, string name, int rarity)
         {
+            [JsonProperty("id")]
             public string Id { get; } = id;
 
+            [JsonProperty("name")]
             public string Name { get; } = name;
 
+            [JsonProperty("rarity")]
             public int Rarity { get; } = rarity;
 
             public bool Equals(Operator? other) => other != null && Name == other.Name && Rarity == other.Rarity;
@@ -748,10 +750,9 @@ namespace MaaWpfGui.ViewModels.UI
 
         /// <summary>
         /// 开始识别干员
+        /// UI 绑定的方法
         /// </summary>
         /// <returns>Task</returns>
-        /// xaml 中用到了
-        /// UI 绑定的方法
         [UsedImplicitly]
         public async Task StartOperBox()
         {
@@ -786,7 +787,7 @@ namespace MaaWpfGui.ViewModels.UI
             }
 
             System.Windows.Forms.Clipboard.Clear();
-            System.Windows.Forms.Clipboard.SetDataObject(JsonConvert.SerializeObject(OperBoxHaveList.Concat(OperBoxNotHaveList), Formatting.Indented));
+            System.Windows.Forms.Clipboard.SetDataObject(JsonConvert.SerializeObject(OperBoxDataArray, Formatting.Indented));
             OperBoxInfo = LocalizationHelper.GetString("CopiedToClipboard");
         }
 
@@ -1179,16 +1180,16 @@ namespace MaaWpfGui.ViewModels.UI
 
         public static ObservableCollection<CombinedData> MiniGameTaskList { get; } =
         [
-            new() { Display = LocalizationHelper.GetString("NotSelected"), Value = "Stop" },
-            new() { Display = LocalizationHelper.GetString("MiniGame@AT@ConversationRoom"), Value = "MiniGame@AT@ConversationRoom" },
-            new() { Display = LocalizationHelper.GetString("MiniGameNameGreenGrass"), Value = "GreenGrass@DuelChannel@Begin" },
+            new() { Display = LocalizationHelper.GetString("MiniGame@ALL@HoneyFruit"), Value = "MiniGame@ALL@GreenGrass@DuelChannel@Begin" },
+            new() { Display = LocalizationHelper.GetString("MiniGameNameSsStore"), Value = "SS@Store@Begin" },
             new() { Display = LocalizationHelper.GetString("MiniGameNameGreenTicketStore"), Value = "GreenTicket@Store@Begin" },
             new() { Display = LocalizationHelper.GetString("MiniGameNameYellowTicketStore"), Value = "YellowTicket@Store@Begin" },
-            new() { Display = LocalizationHelper.GetString("MiniGameNameSsStore"), Value = "SS@Store@Begin" },
             new() { Display = LocalizationHelper.GetString("MiniGameNameRAStore"), Value = "RA@Store@Begin" },
+            new() { Display = LocalizationHelper.GetString("MiniGame@AT@ConversationRoom"), Value = "MiniGame@AT@ConversationRoom" },
+            new() { Display = LocalizationHelper.GetString("MiniGame@ALL@GreenGrass"), Value = "MiniGame@ALL@GreenGrass@DuelChannel@Begin" },
         ];
 
-        private string _miniGameTaskName = ConfigurationHelper.GetGlobalValue(ConfigurationKeys.MiniGameTaskName, "Stop");
+        private string _miniGameTaskName = ConfigurationHelper.GetGlobalValue(ConfigurationKeys.MiniGameTaskName, "SS@Store@Begin");
 
         public string MiniGameTaskName
         {
@@ -1217,12 +1218,12 @@ namespace MaaWpfGui.ViewModels.UI
         {
             return name switch
             {
-                "MiniGame@AT@ConversationRoom" => LocalizationHelper.GetString("MiniGame@AT@ConversationRoomTip"),
-                "GreenGrass@DuelChannel@Begin" => LocalizationHelper.GetString("MiniGameNameGreenGrassTip"),
+                "SS@Store@Begin" => LocalizationHelper.GetString("MiniGameNameSsStoreTip"),
                 "GreenTicket@Store@Begin" => LocalizationHelper.GetString("MiniGameNameGreenTicketStoreTip"),
                 "YellowTicket@Store@Begin" => LocalizationHelper.GetString("MiniGameNameYellowTicketStoreTip"),
-                "SS@Store@Begin" => LocalizationHelper.GetString("MiniGameNameSsStoreTip"),
                 "RA@Store@Begin" => LocalizationHelper.GetString("MiniGameNameRAStoreTip"),
+                "MiniGame@AT@ConversationRoom" => LocalizationHelper.GetString("MiniGame@AT@ConversationRoomTip"),
+                "MiniGame@ALL@GreenGrass@DuelChannel@Begin" => LocalizationHelper.GetString("MiniGame@ALL@GreenGrassTip"),
                 _ => string.Empty,
             };
         }

@@ -48,6 +48,8 @@ void RenderStoppingState();
 
 void UpdateScreenshotDisplay(ID3D11Device* device, ID3D11DeviceContext* context);
 
+void ShowAutoBattleWindow(bool* p_open);
+
 bool maa_loop();
 
 void maa_return();
@@ -63,6 +65,8 @@ void show_current_tasks_and_notifications(const AssistantStatus& status);
 void show_task_chains(const AssistantStatus& status);
 
 void show_connection_status(const AssistantStatus& status);
+
+int select_best_gpu_adapter();
 
 namespace fs = std::filesystem;
 fs::path get_exe_fulldirectory();

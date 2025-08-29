@@ -19,6 +19,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Threading.Tasks;
 using MaaWpfGui.Constants;
+using MaaWpfGui.Constants.Enums;
 using MaaWpfGui.Extensions;
 using MaaWpfGui.Helper;
 using MaaWpfGui.Utilities;
@@ -169,30 +170,30 @@ namespace MaaWpfGui.Models
                 return (CheckUpdateRetT.UnknownError, null, null);
             }
 
-            var errorCode = data["code"]?.ToObject<Enums.MirrorChyanErrorCode>() ?? Enums.MirrorChyanErrorCode.Undivided;
-            if (errorCode != Enums.MirrorChyanErrorCode.Success)
+            var errorCode = data["code"]?.ToObject<MirrorChyanErrorCode>() ?? MirrorChyanErrorCode.Undivided;
+            if (errorCode != MirrorChyanErrorCode.Success)
             {
                 switch (errorCode)
                 {
-                    case Enums.MirrorChyanErrorCode.KeyExpired:
+                    case MirrorChyanErrorCode.KeyExpired:
                         ToastNotification.ShowDirect(LocalizationHelper.GetString("MirrorChyanCdkExpired"));
                         break;
-                    case Enums.MirrorChyanErrorCode.KeyInvalid:
+                    case MirrorChyanErrorCode.KeyInvalid:
                         ToastNotification.ShowDirect(LocalizationHelper.GetString("MirrorChyanCdkInvalid"));
                         AchievementTrackerHelper.Instance.Unlock(AchievementIds.MirrorChyanCdkError);
                         break;
-                    case Enums.MirrorChyanErrorCode.ResourceQuotaExhausted:
+                    case MirrorChyanErrorCode.ResourceQuotaExhausted:
                         ToastNotification.ShowDirect(LocalizationHelper.GetString("MirrorChyanCdkQuotaExhausted"));
                         break;
-                    case Enums.MirrorChyanErrorCode.KeyMismatched:
+                    case MirrorChyanErrorCode.KeyMismatched:
                         ToastNotification.ShowDirect(LocalizationHelper.GetString("MirrorChyanCdkMismatched"));
                         break;
-                    case Enums.MirrorChyanErrorCode.InvalidParams:
-                    case Enums.MirrorChyanErrorCode.ResourceNotFound:
-                    case Enums.MirrorChyanErrorCode.InvalidOs:
-                    case Enums.MirrorChyanErrorCode.InvalidArch:
-                    case Enums.MirrorChyanErrorCode.InvalidChannel:
-                    case Enums.MirrorChyanErrorCode.Undivided:
+                    case MirrorChyanErrorCode.InvalidParams:
+                    case MirrorChyanErrorCode.ResourceNotFound:
+                    case MirrorChyanErrorCode.InvalidOs:
+                    case MirrorChyanErrorCode.InvalidArch:
+                    case MirrorChyanErrorCode.InvalidChannel:
+                    case MirrorChyanErrorCode.Undivided:
                         ToastNotification.ShowDirect(data["msg"]?.ToString() ?? LocalizationHelper.GetString("GameResourceFailed"));
                         break;
                 }
@@ -200,22 +201,22 @@ namespace MaaWpfGui.Models
                 return (CheckUpdateRetT.UnknownError, null, null);
             }
 
-            if (!DateTime.TryParse(data["data"]?["version_name"]?.ToString(), out var version))
+            if (!DateTime.TryParse(data["data"]?["version_name"]?.ToString(), out var versionTime))
             {
                 ToastNotification.ShowDirect(LocalizationHelper.GetString("GameResourceFailed"));
                 return (CheckUpdateRetT.UnknownError, null, null);
             }
 
-            if (DateTime.Compare(currentVersionDateTime, version) >= 0)
+            if (DateTime.Compare(currentVersionDateTime, versionTime) >= 0)
             {
                 return (CheckUpdateRetT.AlreadyLatest, null, null);
             }
 
             // 到这里已经确定有新版本了
             var releaseNote = data["data"]?["release_note"]?.ToString();
-            _logger.Information("New version found: {DateTime:yyyy-MM-dd+HH:mm:ss.fff}, {ReleaseNote}", version, releaseNote);
+            _logger.Information("New version found: {DateTime:yyyy-MM-dd+HH:mm:ss.fff}, {ReleaseNote}", versionTime, releaseNote);
 
-            releaseNote = LocalizationHelper.FormatResourceVersion(releaseNote, version);
+            releaseNote = LocalizationHelper.FormatVersion(releaseNote, versionTime);
 
             SettingsViewModel.VersionUpdateSettings.NewResourceFoundInfo = string.Format(LocalizationHelper.GetString("MirrorChyanResourceUpdateShortTip"), releaseNote);
 
