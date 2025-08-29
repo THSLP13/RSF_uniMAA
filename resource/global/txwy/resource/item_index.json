@@ -905,11 +905,11 @@
     },
     "EXTERMINATION_AGENT": {
         "classifyType": "NORMAL",
-        "description": "以海量實戰記錄為基礎，透過資料精算、邏輯演練與場景類比，PRTS能在代理指揮剿滅作戰時完美復現您的戰術。您甚至不需要再去關注過程。",
+        "description": "以大量實戰記錄為基礎，透過數據分析、邏輯演練與場景模擬，PRTS能在代理指揮剿滅作戰和保全派駐時完美還原您的戰術。您甚至不需要再去關注過程。",
         "icon": "EXTERMINATION_AGENT.png",
-        "name": "PRTS剿滅代理卡",
+        "name": "常態事務代理卡",
         "sortId": 30200,
-        "usage": "承載PRTS功能權限的卡片，啟動後可在剿滅作戰中為您提供代理指揮。"
+        "usage": "具備PRTS功能權限的卡片，啟動後可在剿滅作戰和保全派駐中為您提供代理指揮。"
     },
     "LINKAGE_TKT_GACHA_10_1701": {
         "classifyType": "NORMAL",
@@ -1479,6 +1479,14 @@
         "sortId": -10000,
         "usage": "已經不能再被播放的唱片。能拿來和長久生活在城市廢墟裡的人交換物資。"
     },
+    "act18mini_token_petals": {
+        "classifyType": "NONE",
+        "description": "破碎卻又光彩奪目的花瓣狀結晶，在充斥著死亡的黑色焦土中通常一眼就能辨認出來。它們是航船行駛過後留下的漣漪，銘記著逝去之人在生命最後時刻的情感與記憶。",
+        "icon": "act18mini_token_petals.png",
+        "name": "碎花瓣",
+        "sortId": -10000,
+        "usage": "遺落在戰場廢墟中的鮮血結晶。據說在雙月的光芒最耀眼的時刻，將其放在一處盛開著薔薇的無人之地，幸運的人總能在天亮返回時收穫一些意外的饋贈。"
+    },
     "act18side_token_pieces": {
         "classifyType": "NONE",
         "description": "五線譜上的手寫音符雜亂不堪，只有作者自己才能一眼發現棲身其中的靈感。",
@@ -1494,6 +1502,14 @@
         "name": "神秘試劑",
         "sortId": -10000,
         "usage": "萊茵生命能量科的最新研究成果。收集一定數量可以從危險物品回收處領取必要物資。"
+    },
+    "act1arcade_milestone_point": {
+        "classifyType": "NONE",
+        "description": "小小一張卡券，但累積起來後能兌換不少大獎呢！",
+        "icon": "act1arcade_milestone_point.png",
+        "name": "積點卡券",
+        "sortId": -10000,
+        "usage": "關卡首通獎勵，用於在博物館兌換台換取獎勵，首通後重複通關無法再次獲得。"
     },
     "act1bossrush_milestone_point": {
         "classifyType": "NONE",
@@ -1838,6 +1854,14 @@
         "name": "匿名邀請函",
         "sortId": -10000,
         "usage": "匿名人士在狂歡節上散發的邀請函，憑此可以到城內各處的狂歡夜集市兌換豐厚禮品。放心，人們看到信函，一定會給予熱情招待。"
+    },
+    "act39side_token_garum": {
+        "classifyType": "NONE",
+        "description": "以攪碎的鹽鱗內臟為原料、鹽漠地下河中的微生物為酵母，經過發酵製成的飲品。腥得沁人心脾，臭得蕩氣迴腸，以及，“有沒有人去跟廚師說一下，鹽鱗已經很鹹了，別*伊比利亞粗口*再加鹽了！”",
+        "icon": "act39side_token_garum.png",
+        "name": "鹽鱗鹹鱗汁",
+        "sortId": -10000,
+        "usage": "既是鹽漠海盜的日常飲品，也是他們認可的搶手資源。除非船隊得到蘭姆酒這種無價之寶，否則它的地位永遠不會被取代。"
     },
     "act3bossrush_milestone_point": {
         "classifyType": "NONE",

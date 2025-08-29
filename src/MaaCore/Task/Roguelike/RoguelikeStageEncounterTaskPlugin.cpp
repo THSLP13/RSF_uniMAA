@@ -102,9 +102,12 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::handle_singl
         analyzer.set_replace(Task.get<OcrTaskInfo>("NumberOcrReplace")->replace_map);
         analyzer.set_use_char_model(true);
         if (!analyzer.analyze()) {
-            return std::nullopt;
+            // return std::nullopt;
+            Log.error("Failed to recognize special value for event:", event.name);
         }
-        utils::chars_to_number(analyzer.get_result().front().text, special_val);
+        else {
+            utils::chars_to_number(analyzer.get_result().front().text, special_val);
+        }
     }
 
     int choose_option = process_task(event, special_val);
@@ -141,7 +144,7 @@ std::optional<std::string> asst::RoguelikeStageEncounterTaskPlugin::handle_singl
         sleep(300);
     }
 
-    sleep(500);
+    sleep(1500);
 
     // 判断是否点击成功，成功进入对话后左上角的生命值会消失
     image = ctrler()->get_image();

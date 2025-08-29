@@ -96,7 +96,7 @@
         "DrGrandet": false,
         "client_type": "YoStarJP",
         "drops": {},
-        "enable": true,
+        "enable": false,
         "expiring_medicine": 0,
         "medicine": 0,
         "penguin_id": "",

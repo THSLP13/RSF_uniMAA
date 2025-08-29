@@ -105,6 +105,7 @@
     <ClInclude Include="Controller\ControllerAPI.h" />
     <ClInclude Include="Controller\ControllerFactory.h" />
     <ClInclude Include="Controller\ControlScaleProxy.h" />
+    <ClInclude Include="Controller\LDExtras.h" />
     <ClInclude Include="Controller\MaaThriftController.h" />
     <ClInclude Include="Controller\MaatouchController.h" />
     <ClInclude Include="Controller\MinitouchController.h" />
@@ -117,7 +118,6 @@
     <ClInclude Include="Controller\Platform\PlatformIO.h" />
     <ClInclude Include="Controller\Platform\PlatformFactory.h" />
     <ClInclude Include="InstHelper.h" />
-    <ClInclude Include="LDExtras.h" />
     <ClInclude Include="Task\Experiment\CombatRecordRecognitionTask.h" />
     <ClInclude Include="Task\Experiment\SingleStepBattleProcessTask.h" />
     <ClInclude Include="Task\Fight\FightTimesTaskPlugin.h" />
@@ -129,10 +129,11 @@
     <ClInclude Include="Task\Interface\CustomTask.h" />
     <ClInclude Include="Task\Interface\VideoRecognitionTask.h" />
     <ClInclude Include="Task\Interface\OperBoxTask.h" />
+    <ClInclude Include="Task\Miscellaneous\MultiCopilotTaskPlugin.h" />
+    <ClInclude Include="Task\Miscellaneous\ParadoxRecognitionTask.h" />
     <ClInclude Include="Task\Miscellaneous\ScreenshotTaskPlugin.h" />
     <ClInclude Include="Task\Miscellaneous\OperBoxRecognitionTask.h" />
     <ClInclude Include="Task\Miscellaneous\AccountSwitchTask.h" />
-    <ClInclude Include="Task\Miscellaneous\TaskFileReloadTask.h" />
     <!-- 生息演算 .h Begin -->
     <ClInclude Include="Task\Interface\ReclamationTask.h" />
     <ClInclude Include="Task\Reclamation\ReclamationConfig.h" />
@@ -157,6 +158,8 @@
     <ClInclude Include="Task\Roguelike\Sami\RoguelikeFoldartalStartTaskPlugin.h" />
     <ClInclude Include="Task\Roguelike\Sami\RoguelikeFoldartalUseTaskPlugin.h" />
     <ClInclude Include="Task\Roguelike\Sami\RoguelikeCollapsalParadigmTaskPlugin.h" />
+    <ClInclude Include="Task\Roguelike\Map\AbstractRoguelikeMap.h" />
+    <ClInclude Include="Task\Roguelike\Map\RoguelikeBoskyPassageMap.h" />
     <ClInclude Include="Task\Roguelike\Map\RoguelikeMap.h" />
     <ClInclude Include="Task\Roguelike\Map\RoguelikeRoutingTaskPlugin.h" />
     <ClInclude Include="Task\SSS\SSSBattleProcessTask.h" />
@@ -284,7 +287,6 @@
     <ClInclude Include="Utils\Meta.hpp" />
     <ClInclude Include="Utils\NoWarningCV.h" />
     <ClInclude Include="Utils\NoWarningCVMat.h" />
-    <ClInclude Include="Utils\NoWarningCPR.h" />
     <ClInclude Include="Utils\Platform.hpp" />
     <ClInclude Include="Utils\Platform\Platform.h" />
     <ClInclude Include="Utils\Platform\PlatformPosix.h" />
@@ -309,6 +311,7 @@
     <ClCompile Include="Controller\adb-lite\protocol.cpp" />
     <ClCompile Include="Controller\Controller.cpp" />
     <ClCompile Include="Controller\ControlScaleProxy.cpp" />
+    <ClCompile Include="Controller\LDExtras.cpp" />
     <ClCompile Include="Controller\MaaThriftController.cpp" />
     <ClCompile Include="Controller\MinitouchController.cpp" />
     <ClCompile Include="Controller\MumuExtras.cpp" />
@@ -318,7 +321,6 @@
     <ClCompile Include="Controller\Platform\PosixIO.cpp" />
     <ClCompile Include="Controller\Platform\Win32IO.cpp" />
     <ClCompile Include="InstHelper.cpp" />
-    <ClCompile Include="LDExtras.cpp" />
     <ClCompile Include="Task\Experiment\CombatRecordRecognitionTask.cpp" />
     <ClCompile Include="Task\Experiment\SingleStepBattleProcessTask.cpp" />
     <ClCompile Include="Task\Fight\FightTimesTaskPlugin.cpp" />
@@ -329,10 +331,11 @@
     <ClCompile Include="Task\Infrast\InfrastTrainingTask.cpp" />
     <ClCompile Include="Task\Interface\VideoRecognitionTask.cpp" />
     <ClCompile Include="Task\Interface\OperBoxTask.cpp" />
+    <ClCompile Include="Task\Miscellaneous\MultiCopilotTaskPlugin.cpp" />
+    <ClCompile Include="Task\Miscellaneous\ParadoxRecognitionTask.cpp" />
     <ClCompile Include="Task\Miscellaneous\ScreenshotTaskPlugin.cpp" />
     <ClCompile Include="Task\Miscellaneous\OperBoxRecognitionTask.cpp" />
     <ClCompile Include="Task\Miscellaneous\AccountSwitchTask.cpp" />
-    <ClCompile Include="Task\Miscellaneous\TaskFileReloadTask.cpp" />
     <!-- 生息演算 .cpp Begin -->
     <ClCompile Include="Task\Interface\ReclamationTask.cpp" />
     <ClCompile Include="Task\Reclamation\ReclamationConfig.cpp" />
@@ -351,6 +354,7 @@
     <ClCompile Include="Task\Roguelike\Sami\RoguelikeFoldartalStartTaskPlugin.cpp" />
     <ClCompile Include="Task\Roguelike\Sami\RoguelikeFoldartalUseTaskPlugin.cpp" />
     <ClCompile Include="Task\Roguelike\Sami\RoguelikeCollapsalParadigmTaskPlugin.cpp" />
+    <ClCompile Include="Task\Roguelike\Map\RoguelikeBoskyPassageMap.cpp" />
     <ClCompile Include="Task\Roguelike\Map\RoguelikeMap.cpp" />
     <ClCompile Include="Task\Roguelike\Map\RoguelikeRoutingTaskPlugin.cpp" />
     <ClCompile Include="Task\Roguelike\RoguelikeConfig.cpp" />

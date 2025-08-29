@@ -639,6 +639,16 @@ public:
             }
             sub_task.extra_info = info_str;
 
+            //BattleFormationOperUnavailable
+            if(details["what"]=="BattleFormationOperUnavailable") {
+                sub_task.error_msg = "干员";
+                sub_task.error_msg += details["details"]["oper_name"].get<std::string>();
+                sub_task.error_msg += " 不满足 ";
+                sub_task.error_msg += details["details"]["requirement_type"].get<std::string>();
+                status.last_sub_task_error = sub_task_type_to_display_string(task_type) + ": " + sub_task.error_msg;
+                add_notification(sub_task.error_msg);
+            }
+
             // 特殊子任务通知（如基建宿舍冲突）
             if (task_type == SubTaskType::InfrastDormDoubleConfirmButton) {
                 add_notification("注意：基建宿舍存在干员冲突，需要二次确认！");
@@ -704,7 +714,7 @@ public:
         status.active_task_count = 0;
         status.current_sub_task.clear();
         status.current_sub_task_type = SubTaskType::Unknown;
-        status.last_sub_task_error.clear();
+        //status.last_sub_task_error.clear();
 
         // 清空异步调用记录
         status.async_call_records.clear();

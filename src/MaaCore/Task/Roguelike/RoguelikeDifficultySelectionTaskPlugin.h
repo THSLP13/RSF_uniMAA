@@ -19,5 +19,8 @@ private:
     bool select_difficulty(const int difficulty = 0);
 
     int m_current_difficulty = -1;
+    mutable bool m_has_changed = false;
+
+    mutable int m_collectible_difficulty = -1;
 };
 }

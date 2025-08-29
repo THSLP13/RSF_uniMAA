@@ -152,8 +152,8 @@ BattlefieldClassifier::SkillReadyResult BattlefieldClassifier::skill_ready_analy
         Log.trace("Class changed", last_class, class_id);
         need_save = true;
     }
-    // y 或者 c
-    else if ((class_id == 2 || class_id == 0) && duration_since_last_save > 5) {
+    // y 全存，c 5 秒存一次
+    else if (class_id == 2 || (class_id == 0 && duration_since_last_save > 5)) {
         Log.trace("Class is", class_id);
         need_save = true;
     }
@@ -164,7 +164,7 @@ BattlefieldClassifier::SkillReadyResult BattlefieldClassifier::skill_ready_analy
     }
 
     // 新增：如果最高得分低于阈值，则保存
-    if (score < 0.9f) {
+    if (score < 0.75f) {
         Log.trace("Low score", score);
         need_save = true;
     }

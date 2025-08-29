@@ -1,0 +1,9 @@
+{
+    "EA-OpenOcr": {
+        "text": ["Elegies", "Ashes", "Dying", "Flames"]
+    },
+    "EAChapterToEA": {
+        "text": ["FLICKERIE", "Flickering", "Shadows", "FLICKERING", "SHADOWS"],
+        "roi": [1070, 498, 134, 26]
+    }
+}

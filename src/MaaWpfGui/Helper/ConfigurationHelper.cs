@@ -294,6 +294,14 @@ namespace MaaWpfGui.Helper
             }
 
             SetKvOrMigrate(parsed);
+            if (Save(_configurationBakFile))
+            {
+                _logger.Information("{File} saved", _configurationBakFile);
+            }
+            else
+            {
+                _logger.Warning("{File} save failed", _configurationBakFile);
+            }
 
             return true;
         }
@@ -379,16 +387,6 @@ namespace MaaWpfGui.Helper
             return SetValue(storageKey + name + ".IsChecked", value);
         }
 
-        public static string GetFacilityOrder(string facility, string defaultValue)
-        {
-            return GetValue("Infrast.Order." + facility, defaultValue);
-        }
-
-        public static bool SetFacilityOrder(string facility, string value)
-        {
-            return SetValue("Infrast.Order." + facility, value);
-        }
-
         public static string GetTimer(int i, string defaultValue)
         {
             return GetGlobalValue($"Timer.Timer{i + 1}", defaultValue);
@@ -439,6 +437,17 @@ namespace MaaWpfGui.Helper
             return SetValue("TaskQueue.Order." + task, value);
         }
 
+        public static int GetSettingOrder(string setting, int defaultValue)
+        {
+            var value = GetGlobalValue("Settings.Order." + setting, defaultValue.ToString());
+            return int.TryParse(value, out var result) ? result : defaultValue;
+        }
+
+        public static bool SetSettingOrder(string setting, int value)
+        {
+            return SetGlobalValue("Settings.Order." + setting, value.ToString());
+        }
+
         public static void Release()
         {
             lock (_lock)
@@ -455,15 +464,6 @@ namespace MaaWpfGui.Helper
                 else
                 {
                     _logger.Warning("{File} save failed", _configurationFile);
-                }
-
-                if (Save(_configurationBakFile))
-                {
-                    _logger.Information("{File} saved", _configurationBakFile);
-                }
-                else
-                {
-                    _logger.Warning("{File} save failed", _configurationBakFile);
                 }
             }
 

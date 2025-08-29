@@ -77,6 +77,384 @@ AsstHandle asstPtr = nullptr;
 
 using json = nlohmann::json;
 
+
+#include <regex>
+#include <urlmon.h>
+#include <ShlObj.h>
+
+#pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "shell32.lib")
+
+// 全局状态变量
+struct AutoBattleState {
+    char codeInput[128] = "";
+    char filePath[512] = "";
+    bool showDetails = false;
+    json copilotInfo;
+    json copilotContent;
+    bool autoFormation = false;
+    bool ignoreRequirements = false;
+    bool addLowTrust = false;
+};
+
+AutoBattleState g_autoBattleState;
+static bool showAutoBattleWindow = false;
+
+// 辅助函数：检查字符串是否为纯数字
+bool isAllDigits(const std::string& s) {
+    return std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+// 辅助函数：下载文件
+bool downloadFile(const std::string& url, const std::string& savePath) {
+    // 创建cache目录（如果不存在）
+    fs::create_directories(fs::path(savePath).parent_path());
+
+    HRESULT hr = URLDownloadToFileA(NULL, url.c_str(), savePath.c_str(), 0, NULL);
+    return hr == S_OK;
+}
+
+// 常量定义
+#define MAX_CODE_LENGTH 32
+#define MAX_ITEMID_LENGTH 64
+#define MAX_NAME_LENGTH 128
+#define MAX_DESCRIPTION_LENGTH 512
+#define SEARCH_QUERY_LENGTH 128
+
+// 掉落信息结构体
+struct DropInfo {
+    char dropType[32];
+    char itemId[MAX_ITEMID_LENGTH];
+};
+
+// 关卡信息结构体
+struct StageInfo {
+    int apCost;
+    char code[MAX_CODE_LENGTH];
+    char stageId[64];
+    std::vector<DropInfo> dropInfos;
+};
+
+// 物品信息结构体
+struct ItemInfo {
+    char name[MAX_NAME_LENGTH];
+    char description[MAX_DESCRIPTION_LENGTH];
+};
+
+// 全局数据存储
+std::vector<StageInfo> all_stages;
+std::unordered_map<const char*, ItemInfo> item_index;  // 使用const char*作为键
+char search_query[SEARCH_QUERY_LENGTH] = "";
+std::vector<StageInfo> filtered_stages;
+bool show_drop_popup = false;
+const StageInfo* current_stage = nullptr;
+
+// 辅助函数：字符串转小写
+void to_lower(const char* src, char* dest) {
+    while (*src) {
+        //*dest++ = tolower((unsigned char)*src++);
+        *dest++ = (unsigned char)*src++;
+    }
+    *dest = '\0';
+}
+// 辅助函数：检查字符串是否包含指定子串
+static bool string_contains(const char* str, const char* substr) {
+    return strstr(str, substr) != nullptr;
+}
+
+// 加载关卡数据
+bool load_stages() {
+    std::ifstream file("resource/stages.json");
+    if (!file.is_open()) return false;
+
+    json j;
+    file >> j;
+
+    all_stages.clear();
+    for (const auto& entry : j) {
+        StageInfo stage;
+        stage.apCost = entry["apCost"].get<int>();
+
+        // 复制字符串
+        strncpy(stage.code, entry["code"].get<std::string>().c_str(), MAX_CODE_LENGTH - 1);
+        stage.code[MAX_CODE_LENGTH - 1] = '\0';
+
+        strncpy(stage.stageId, entry["stageId"].get<std::string>().c_str(), 63);
+        stage.stageId[63] = '\0';
+
+        // 处理掉落信息
+        for (const auto& drop : entry["dropInfos"]) {
+            DropInfo di;
+            strncpy(di.dropType, drop["dropType"].get<std::string>().c_str(), 31);
+            di.dropType[31] = '\0';
+
+            strncpy(di.itemId, drop["itemId"].get<std::string>().c_str(), MAX_ITEMID_LENGTH - 1);
+            di.itemId[MAX_ITEMID_LENGTH - 1] = '\0';
+
+            stage.dropInfos.push_back(di);
+        }
+
+        all_stages.push_back(stage);
+    }
+
+    return true;
+}
+
+// 加载物品索引（修复物品查询问题）
+static bool load_item_index() {
+    std::ifstream file("resource/item_index.json");
+    if (!file.is_open()) return false;
+
+    json j;
+    try {
+        file >> j;
+    }
+    catch (const std::exception& e) {
+        // 输出JSON解析错误信息
+        printf("解析item_index.json失败: %s\n", e.what());
+        return false;
+    }
+
+    // 清理之前的数据
+    for (auto& pair : item_index) {
+        delete[] pair.first;
+    }
+    item_index.clear();
+
+    for (const auto& entry : j.items()) {
+        ItemInfo item;
+        const std::string& key = entry.key();
+
+        // 确保名称字段存在
+        if (!entry.value().contains("name")) {
+            printf("物品 %s 缺少name字段\n", key.c_str());
+            continue;
+        }
+
+        // 复制物品名称
+        const std::string& name = entry.value()["name"].get<std::string>();
+        strncpy(item.name, name.c_str(), MAX_NAME_LENGTH - 1);
+        item.name[MAX_NAME_LENGTH - 1] = '\0';
+
+        // 修复description字段解析（处理非字符串类型）
+        if (entry.value().contains("description")) {
+            const auto& desc_element = entry.value()["description"];
+            // 先检查是否为字符串类型
+            if (desc_element.is_string()) {
+                const std::string& desc = desc_element.get<std::string>();
+                strncpy(item.description, desc.c_str(), MAX_DESCRIPTION_LENGTH - 1);
+                item.description[MAX_DESCRIPTION_LENGTH - 1] = '\0';
+            }
+            // 处理null类型
+            else if (desc_element.is_null()) {
+                item.description[0] = '\0';
+                printf("物品 %s 的description字段为null\n", key.c_str());
+            }
+            // 处理其他非字符串类型
+            else {
+                const std::string desc = desc_element.dump(); // 转换为JSON字符串表示
+                strncpy(item.description, desc.c_str(), MAX_DESCRIPTION_LENGTH - 1);
+                item.description[MAX_DESCRIPTION_LENGTH - 1] = '\0';
+                printf("物品 %s 的description字段类型不是字符串，已转换为JSON表示\n", key.c_str());
+            }
+        }
+        else {
+            item.description[0] = '\0';
+        }
+
+        // 分配键的内存并存储
+        char* key_str = new char[key.length() + 1];
+        strcpy(key_str, key.c_str());
+        item_index[key_str] = item;
+    }
+
+    return true;
+}
+
+// 辅助函数：查找物品信息（新增，修复查询问题）
+static const ItemInfo* find_item(const char* itemId) {
+    // 遍历哈希表查找物品（修复哈希表查找问题）
+    for (const auto& pair : item_index) {
+        if (strcmp(pair.first, itemId) == 0) {
+            return &pair.second;
+        }
+    }
+    // 调试信息：输出未找到的物品ID
+    printf("未找到物品: %s\n", itemId);
+    return nullptr;
+}
+
+
+// 过滤关卡
+void filter_stages(const char* query) {
+    filtered_stages.clear();
+    if (strlen(query) == 0) {
+        return;
+    }
+
+    char lower_query[SEARCH_QUERY_LENGTH];
+    char lower_code[MAX_CODE_LENGTH];
+
+    to_lower(query, lower_query);
+
+    for (const auto& stage : all_stages) {
+        to_lower(stage.code, lower_code);
+
+        if (strstr(lower_code, lower_query) != nullptr) {
+            filtered_stages.push_back(stage);
+        }
+    }
+}
+
+#include <WinINet.h>
+#include <chrono>
+#include <sstream>
+#pragma comment(lib, "wininet.lib")
+
+// 辅助常量与状态变量
+namespace {
+    const std::string PENGUIN_FILE = "cache/penguin-stats.json";
+    const std::string PENGUIN_URL = "https://penguin-stats.io/PenguinStats/api/v2/_private/result/matrix/CN/global/all";
+    const int MAX_DOWNLOAD_TIMEOUT = 30000; // 30秒超时
+    const int64_t ONE_DAY_MS = 86400000;   // 一天的毫秒数
+
+    // 下载状态
+    enum class DownloadStatus {
+        Idle,
+        Downloading,
+        Complete,
+        Failed,
+        Cancelled
+    };
+
+    // 线程安全的下载状态管理
+    struct DownloadState {
+        std::mutex mtx;
+        DownloadStatus status = DownloadStatus::Idle;
+        int progress = 0;
+        std::string error_msg;
+    };
+
+    static DownloadState download_state;
+    static std::thread download_thread;
+}
+
+// 辅助函数：检查文件是否存在且未过期（修正版）
+static bool is_file_valid() {
+    namespace fs = std::filesystem;
+    try {
+        if (!fs::exists(PENGUIN_FILE)) return false;
+
+        // 获取文件最后修改时间
+        auto last_write = fs::last_write_time(PENGUIN_FILE);
+
+        // 将文件时间转换为system_clock时间（兼容不同时钟类型）
+        auto file_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+            last_write - fs::file_time_type::clock::now() + std::chrono::system_clock::now()
+        );
+
+        // 计算与当前时间的差值（毫秒）
+        auto now = std::chrono::system_clock::now();
+        auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(now - file_time).count();
+
+        return diff <= ONE_DAY_MS;
+    }
+    catch (...) {
+        return false;
+    }
+}
+
+// 辅助函数：HTTP下载文件（使用WinINet，MSVC自带）
+static void download_file() {
+    HINTERNET hInternet = InternetOpenA("StageEditor/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) {
+        std::lock_guard<std::mutex> lock(download_state.mtx);
+        download_state.status = DownloadStatus::Failed;
+        download_state.error_msg = "初始化网络失败";
+        return;
+    }
+
+    HINTERNET hConnect = InternetOpenUrlA(hInternet, PENGUIN_URL.c_str(), NULL, 0,
+        INTERNET_FLAG_RELOAD | INTERNET_FLAG_NO_CACHE_WRITE, 0);
+    if (!hConnect) {
+        InternetCloseHandle(hInternet);
+        std::lock_guard<std::mutex> lock(download_state.mtx);
+        download_state.status = DownloadStatus::Failed;
+        download_state.error_msg = "连接服务器失败";
+        return;
+    }
+
+    // 创建缓存目录
+    std::filesystem::create_directories("cache");
+    std::ofstream file(PENGUIN_FILE, std::ios::binary);
+    if (!file.is_open()) {
+        InternetCloseHandle(hConnect);
+        InternetCloseHandle(hInternet);
+        std::lock_guard<std::mutex> lock(download_state.mtx);
+        download_state.status = DownloadStatus::Failed;
+        download_state.error_msg = "无法创建文件";
+        return;
+    }
+
+    // 下载数据并更新进度
+    char buffer[4096];
+    DWORD bytes_read;
+    DWORD file_size = 0;
+    DWORD content_length = 0;
+    DWORD len = sizeof(content_length);
+
+    // 获取文件总大小
+    HttpQueryInfoA(hConnect, HTTP_QUERY_CONTENT_LENGTH | HTTP_QUERY_FLAG_NUMBER,
+        &content_length, &len, NULL);
+
+    while (InternetReadFile(hConnect, buffer, sizeof(buffer), &bytes_read) && bytes_read > 0) {
+        // 检查是否取消下载
+        {
+            std::lock_guard<std::mutex> lock(download_state.mtx);
+            if (download_state.status == DownloadStatus::Cancelled) {
+                file.close();
+                InternetCloseHandle(hConnect);
+                InternetCloseHandle(hInternet);
+                std::filesystem::remove(PENGUIN_FILE);
+                return;
+            }
+        }
+
+        file.write(buffer, bytes_read);
+        file_size += bytes_read;
+
+        // 更新进度
+        if (content_length > 0) {
+            std::lock_guard<std::mutex> lock(download_state.mtx);
+            download_state.progress = static_cast<int>((file_size * 100) / content_length);
+        }
+    }
+
+    file.close();
+    InternetCloseHandle(hConnect);
+    InternetCloseHandle(hInternet);
+
+    std::lock_guard<std::mutex> lock(download_state.mtx);
+    if (file_size == 0) {
+        download_state.status = DownloadStatus::Failed;
+        download_state.error_msg = "下载内容为空";
+        std::filesystem::remove(PENGUIN_FILE);
+    }
+    else {
+        download_state.status = DownloadStatus::Complete;
+    }
+}
+
+// 辅助函数：时间戳转换（毫秒级时间戳转time_t）
+static time_t timestamp_to_timet(int64_t ms_timestamp) {
+    return static_cast<time_t>(ms_timestamp / 1000);
+}
+
+// 辅助函数：获取当前时间戳（秒）
+static time_t get_current_time() {
+    return std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+}
+
 // 字符串缓冲区大小定义
 const int STR_BUFFER_SIZE = 256;
 const int STAGE_BUFFER_SIZE = 128;
@@ -747,12 +1125,96 @@ private:
     void draw_stage_picker() {
         if (!stage_picker_open) return;
 
-        ImGui::SetNextWindowSizeConstraints(ImVec2(window_min_width, 200), ImVec2(FLT_MAX, FLT_MAX));
-        ImGui::SetNextWindowSize(ImVec2(window_min_width, 250), ImGuiCond_FirstUseEver);
+        // 确保数据已加载
+        static bool data_loaded = false;
+        if (!data_loaded) {
+            data_loaded = load_stages() && load_item_index();
+        }
+
+        ImGui::SetNextWindowSizeConstraints(ImVec2(window_min_width, 400), ImVec2(FLT_MAX, FLT_MAX));
+        ImGui::SetNextWindowSize(ImVec2(window_min_width, 500), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("选择关卡", &stage_picker_open)) {
             ImGui::Text("请选择要刷取的关卡...");
             ImGui::Spacing();
 
+            // 搜索区域
+            ImGui::SetNextItemWidth(input_max_width - 100);
+            ImGui::InputText("##stage_search", search_query, SEARCH_QUERY_LENGTH);
+            ImGui::SameLine();
+            if (ImGui::Button("查询", ImVec2(80, 0))) {
+                filter_stages(search_query);
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            if (!data_loaded) {
+                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "加载关卡数据失败，请检查相关文件");
+            }
+            else if (ImGui::BeginTable("stage_results", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable)) {
+                ImGui::TableSetupColumn("关卡名", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("消耗理智", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("掉落材料", ImGuiTableColumnFlags_WidthFixed);
+                ImGui::TableSetupColumn("选择", ImGuiTableColumnFlags_WidthFixed); // 新增选择列
+                ImGui::TableHeadersRow();
+
+                for (size_t i = 0; i < filtered_stages.size(); i++) {
+                    const auto& stage = filtered_stages[i];
+                    ImGui::TableNextRow();
+
+                    // 关卡名 - 修正HARD显示
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::Text("%s", stage.code);
+                    // 如果stageId包含"tough"，显示高亮的HARD
+                    if (string_contains(stage.stageId, "tough")) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Hard");
+                    }
+
+                    // 消耗理智
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::Text("%d", stage.apCost);
+
+                    // 查看掉落材料按钮
+                    ImGui::TableSetColumnIndex(2);
+                    char button_id[128];
+                    snprintf(button_id, sizeof(button_id), "查看##stage_%zu", i);
+
+                    if (ImGui::Button(button_id)) {
+                        current_stage = &filtered_stages[i];
+                        show_drop_popup = true;
+                    }
+
+                    // 选择按钮 - 新增功能
+                    ImGui::TableSetColumnIndex(3);
+                    char select_id[128];
+                    snprintf(select_id, sizeof(select_id), "选择##stage_%zu", i);
+                    if (ImGui::Button(select_id)) {
+                        // 构建带Hard后缀的关卡名
+                        char full_stage_name[128];
+                        snprintf(full_stage_name, sizeof(full_stage_name), "%s", stage.code);
+
+                        // 如果是Hard关卡，添加Hard后缀
+                        if (string_contains(stage.stageId, "tough")) {
+                            strncat(full_stage_name, "Hard", sizeof(full_stage_name) - strlen(full_stage_name) - 1);
+                        }
+
+                        // 填入输入框
+                        strncpy(temp_stage, full_stage_name, STAGE_BUFFER_SIZE - 1);
+                        temp_stage[STAGE_BUFFER_SIZE - 1] = '\0';
+
+                    }
+                }
+
+                ImGui::EndTable();
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            // 手动输入关卡代码
             ImGui::SetNextItemWidth(input_max_width);
             ImGui::InputText("##stage_preview", temp_stage, STAGE_BUFFER_SIZE);
 
@@ -764,15 +1226,149 @@ private:
             if (ImGui::Button("取消##stage_picker")) {
                 stage_picker_open = false;
             }
+
+            // 掉落材料弹窗
+            if (show_drop_popup && current_stage) {
+                ImGui::SetNextWindowSizeConstraints(ImVec2(400, 200), ImVec2(600, 500));
+                ImGui::OpenPopup("掉落材料");
+
+                if (ImGui::BeginPopup("掉落材料", ImGuiWindowFlags_Popup | ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::Text("关卡 %s", current_stage->code);
+                    // 弹窗标题显示Hard标记
+                    if (string_contains(current_stage->stageId, "tough")) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Hard");
+                    }
+                    ImGui::Spacing();
+
+                    if (ImGui::BeginTable("drop_items", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable)) {
+                        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed);
+                        ImGui::TableSetupColumn("物品名", ImGuiTableColumnFlags_WidthStretch);
+                        ImGui::TableSetupColumn("掉落类型", ImGuiTableColumnFlags_WidthFixed);
+                        ImGui::TableHeadersRow();
+
+                        for (const auto& drop : current_stage->dropInfos) {
+                            ImGui::TableNextRow();
+
+                            // ID
+                            ImGui::TableSetColumnIndex(0);
+                            ImGui::Text("%s", drop.itemId);
+
+                            // 物品名
+                            ImGui::TableSetColumnIndex(1);
+                            const ItemInfo* item = find_item(drop.itemId);
+                            if (item) {
+                                ImGui::Text("%s", item->name);
+                            }
+                            else {
+                                ImGui::TextDisabled("未知物品");
+                            }
+
+                            // 掉落类型（带翻译）
+                            ImGui::TableSetColumnIndex(2);
+                            if (strcmp(drop.dropType, "NORMAL_DROP") == 0) {
+                                ImGui::Text("常规掉落");
+                            }
+                            else if (strcmp(drop.dropType, "EXTRA_DROP") == 0) {
+                                ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "额外掉落");
+                            }
+                            else if (strcmp(drop.dropType, "FURNITURE") == 0) {
+                                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "家具");
+                            }
+                            else {
+                                ImGui::Text("%s", drop.dropType);
+                            }
+                        }
+
+                        ImGui::EndTable();
+                    }
+
+                    if (ImGui::Button("关闭", ImVec2(120, 0))) {
+                        ImGui::CloseCurrentPopup();
+                        show_drop_popup = false;
+                        current_stage = nullptr;
+                    }
+                    ImGui::EndPopup();
+                }
+                else {
+                    show_drop_popup = false;
+                }
+            }
         }
         ImGui::End();
     }
 
+    // 修改后的编辑窗口函数
     void draw_drops_editor() {
-        if (!drops_editor_open) return;
+        if (!drops_editor_open) {
+            // 清理下载线程
+            if (download_thread.joinable()) {
+                {
+                    std::lock_guard<std::mutex> lock(download_state.mtx);
+                    download_state.status = DownloadStatus::Cancelled;
+                }
+                download_thread.join();
+            }
+            download_state.status = DownloadStatus::Idle;
+            download_state.progress = 0;
+            download_state.error_msg.clear();
+            return;
+        }
 
-        ImGui::SetNextWindowSizeConstraints(ImVec2(window_min_width, 200), ImVec2(FLT_MAX, FLT_MAX));
-        ImGui::SetNextWindowSize(ImVec2(window_min_width, 300), ImGuiCond_FirstUseEver);
+        // 检查并下载文件
+        static bool checked_file = false;
+        if (!checked_file) {
+            if (!is_file_valid()) {
+                // 启动下载线程
+                std::lock_guard<std::mutex> lock(download_state.mtx);
+                download_state.status = DownloadStatus::Downloading;
+                download_state.progress = 0;
+                download_thread = std::thread(download_file);
+            }
+            checked_file = true;
+        }
+
+        // 显示下载进度窗口
+        {
+            std::lock_guard<std::mutex> lock(download_state.mtx);
+            if (download_state.status == DownloadStatus::Downloading) {
+                ImGui::OpenPopup("下载数据中");
+                if (ImGui::BeginPopupModal("下载数据中", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::Text("正在更新掉落数据...");
+                    ImGui::ProgressBar(static_cast<float>(download_state.progress) / 100.0f, ImVec2(-1, 0));
+                    ImGui::Text("%d%%", download_state.progress);
+                    if (ImGui::Button("取消下载")) {
+                        download_state.status = DownloadStatus::Cancelled;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
+                return; // 下载中阻塞其他操作
+            }
+            else if (download_state.status == DownloadStatus::Failed) {
+                ImGui::OpenPopup("下载失败");
+                if (ImGui::BeginPopupModal("下载失败", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGui::TextColored(ImVec4(1, 0, 0, 1), "下载失败: %s", download_state.error_msg.c_str());
+                    if (ImGui::Button("重试")) {
+                        download_state.status = DownloadStatus::Downloading;
+                        download_state.progress = 0;
+                        download_thread = std::thread(download_file);
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button("关闭")) {
+                        drops_editor_open = false;
+                        ImGui::CloseCurrentPopup();
+                    }
+                    ImGui::EndPopup();
+                }
+                return;
+            }
+        }
+
+        // 窗口布局
+        ImGui::SetNextWindowSizeConstraints(ImVec2(window_min_width, 400), ImVec2(FLT_MAX, FLT_MAX));
+        ImGui::SetNextWindowSize(ImVec2(window_min_width, 500), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("编辑掉落条件", &drops_editor_open)) {
             ImGui::Text("请设置需要的掉落材料...");
             ImGui::Spacing();
@@ -785,48 +1381,269 @@ private:
 
             static char new_item_id[32] = { 0 };
             static int new_item_count = 1;
+            static char search_name[128] = { 0 }; // 材料名称搜索框
+            static std::vector<nlohmann::json> filtered_matrix; // 筛选后的掉落数据
 
-            if (ImGui::BeginTable("drops_temp", 2, ImGuiTableFlags_Borders)) {
+            ImGui::Text("搜索材料:");
+            ImGui::SetNextItemWidth(200);
+            ImGui::InputText("##search_name", search_name, sizeof(search_name));
+            ImGui::SameLine();
+
+            // 添加查询按钮，点击才触发查询
+            if (ImGui::Button("查询材料")) {
+                filtered_matrix.clear();
+
+                // 空查询内容则清空列表
+                if (strlen(search_name) <= 1) {
+                }
+                else {
+
+                    // 1. 从item_index查找全字匹配的itemId（全字匹配材料名称）
+                    std::vector<std::string> target_ids;
+                    for (const auto& [id, item] : item_index) {
+                        // 全字匹配判断（完全相等）
+                        if (strcmp(item.name, search_name) == 0) {
+                            target_ids.push_back(id);
+                        }
+                    }
+                    if (!target_ids.empty()) {
+                        // 2. 解析penguin-stats.json
+                        try {
+                            std::ifstream file(PENGUIN_FILE);
+                            if (!file.is_open()) throw "Access to penguin-stat.cn temp file failed.";
+
+                            nlohmann::json data;
+                            file >> data;
+                            if (!data.contains("matrix")) throw "Access to penguin-stat.cn temp file failed:File incomplete.";
+
+                            // 3. 筛选并计算"刷取一个所需理智"（使用 stdDev 计算）
+                            std::vector<std::tuple<float, nlohmann::json>> temp_results;
+                            auto now = get_current_time();
+
+                            for (const auto& entry : data["matrix"]) {
+                                std::string item_id = entry["itemId"].get<std::string>();
+                                if (std::find(target_ids.begin(), target_ids.end(), item_id) == target_ids.end()) {
+                                    continue;
+                                }
+
+                                // 过滤过期关卡
+                                if (entry.contains("end") && !entry["end"].is_null()) {
+                                    time_t end_time = timestamp_to_timet(entry["end"].get<int64_t>());
+                                    if (end_time < now) continue;
+                                }
+
+                                // 获取关卡消耗理智
+                                std::string stage_id = entry["stageId"].get<std::string>();
+                                int ap_cost = -1;
+                                for (const auto& stage : all_stages) {
+                                    if (stage.stageId == stage_id) {
+                                        ap_cost = stage.apCost;
+                                        break;
+                                    }
+                                }
+                                if (ap_cost <= 0) continue;
+
+                                // 关键计算：期望理智 = 单次作战理智消耗 / stdDev
+                                if (entry.contains("stdDev")) {
+                                    float std_dev = entry["stdDev"].get<float>();
+
+                                    // 避免除以零或负数
+                                    if (std_dev <= 0) continue;
+
+                                    float cost_per = ap_cost / std_dev;  // 使用指定公式计算
+                                    temp_results.emplace_back(cost_per, entry);
+                                }
+                            }
+
+                            // 按期望理智升序排序（数值越小越划算）
+                            std::sort(temp_results.begin(), temp_results.end());
+                            size_t take = std::min(30ULL, temp_results.size());
+                            for (size_t i = 0; i < take; ++i) {
+                                filtered_matrix.push_back(std::get<1>(temp_results[i]));
+                            }
+                        }
+                        catch (...) {
+                            ImGui::TextColored(ImVec4(1, 0, 0, 1), "解析数据失败");
+                        }
+                    }
+                }
+            }
+
+
+            ImGui::SameLine();
+
+            // 添加清空按钮
+            if (ImGui::Button("清空")) {
+                search_name[0] = '\0';
+                filtered_matrix.clear();
+            }
+
+            // 原材料列表（带新增列）
+            ImGui::Spacing();
+            ImGui::Text("已选材料:");
+            if (ImGui::BeginTable("drops_temp", 5, ImGuiTableFlags_Borders)) { // 新增列：名称、+、-、删除
                 ImGui::TableSetupColumn("材料ID", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("材料名称", ImGuiTableColumnFlags_WidthFixed, 120);
                 ImGui::TableSetupColumn("数量", ImGuiTableColumnFlags_WidthFixed, 60);
+                ImGui::TableSetupColumn("调整", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthFixed, 60);
                 ImGui::TableHeadersRow();
 
-                for (auto& [id, count] : temp_drops) {
+                // 遍历现有材料
+                auto it = temp_drops.begin();
+                while (it != temp_drops.end()) {
                     ImGui::TableNextRow();
+                    const auto& [id, count] = *it;
+
+                    // 材料ID
                     ImGui::TableSetColumnIndex(0);
                     ImGui::Text("%s", id.c_str());
+
+                    // 材料名称
                     ImGui::TableSetColumnIndex(1);
-                    ImGui::InputInt(("##count_" + id).c_str(), &count);
+                    const ItemInfo* item = find_item(id.c_str());
+                    ImGui::Text("%s", item ? item->name : "未知");
+
+                    // 数量
+                    ImGui::TableSetColumnIndex(2);
+                    ImGui::Text("%d", count);
+
+                    // 增减按钮
+                    ImGui::TableSetColumnIndex(3);
+                    char add_id[64], sub_id[64];
+                    snprintf(add_id, sizeof(add_id), "+##+%s", id.c_str());
+                    snprintf(sub_id, sizeof(sub_id), "-##-%s", id.c_str());
+
+                    if (ImGui::Button(add_id, ImVec2(30, 0))) {
+                        it->second++;
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::Button(sub_id, ImVec2(30, 0)) && count > 1) {
+                        it->second--;
+                    }
+
+                    // 删除按钮
+                    ImGui::TableSetColumnIndex(4);
+                    char del_id[64];
+                    snprintf(del_id, sizeof(del_id), "删除##del%s", id.c_str());
+                    if (ImGui::Button(del_id, ImVec2(-1, 0))) {
+                        it = temp_drops.erase(it);
+                        continue;
+                    }
+
+                    ++it;
                 }
                 ImGui::EndTable();
             }
 
+            // 添加新材料输入区
+            ImGui::Spacing();
+            ImGui::Text("添加新材料:");
             ImGui::SetNextItemWidth(80);
-            ImGui::InputText("##new_item_id", new_item_id, 32);
+            ImGui::InputText("##new_item_id", new_item_id, sizeof(new_item_id));
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120);
+            ImGui::Text("材料名称: %s",
+                find_item(new_item_id) ? find_item(new_item_id)->name : "未知");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(60);
             ImGui::InputInt("##new_item_count", &new_item_count);
+            new_item_count = std::max(1, new_item_count); // 限制最小值1
             ImGui::SameLine();
             if (ImGui::Button("添加##drops")) {
-                if (strlen(new_item_id) > 0 && new_item_count > 0) {
+                if (strlen(new_item_id) > 0) {
                     temp_drops[new_item_id] = new_item_count;
                 }
             }
 
-            if (ImGui::Button("确认设置##drops")) {
-                stage_config.drops = temp_drops;
-                initialized = false;
-                drops_editor_open = false;
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("取消##drops")) {
-                initialized = false;
-                drops_editor_open = false;
-            }
-        }
-        ImGui::End();
-    }
+            // 搜索结果表格（关卡推荐）
+            if (!filtered_matrix.empty()) {
+                ImGui::Spacing();
+                ImGui::Text("推荐关卡 (按刷取成本升序):");
+                if (ImGui::BeginTable("stage_recommend", 4, ImGuiTableFlags_Borders)) {
+                    ImGui::TableSetupColumn("关卡", ImGuiTableColumnFlags_WidthFixed, 80);
+                    ImGui::TableSetupColumn("刷取一个所需理智", ImGuiTableColumnFlags_WidthFixed, 120);
+                    ImGui::TableSetupColumn("添加材料", ImGuiTableColumnFlags_WidthFixed, 80);
+                    ImGui::TableSetupColumn("选择关卡", ImGuiTableColumnFlags_WidthFixed, 80);
+                    ImGui::TableHeadersRow();
 
+                    // 使用索引生成唯一ID
+                    for (size_t idx = 0; idx < filtered_matrix.size(); ++idx) {
+                        const auto& entry = filtered_matrix[idx];
+                        ImGui::TableNextRow();
+                        std::string item_id = entry["itemId"].get<std::string>();
+                        std::string stage_id = entry["stageId"].get<std::string>();
+
+                        // 关卡名
+                        ImGui::TableSetColumnIndex(0);
+                        std::string stage_code = "未知";
+                        for (const auto& stage : all_stages) {
+                            if (stage.stageId == stage_id) {
+                                stage_code = stage.code;
+                                if (string_contains(stage.stageId, "tough")) {
+                                    stage_code += "Hard";
+                                }
+                                break;
+                            }
+                        }
+                        ImGui::Text("%s", stage_code.c_str());
+
+                        // 刷取成本
+                        ImGui::TableSetColumnIndex(1);
+                        int ap_cost = 0;
+                        for (const auto& stage : all_stages) {
+                            if (stage.stageId == stage_id) {
+                                ap_cost = stage.apCost;
+                                break;
+                            }
+                        }
+                        float cost_per = ap_cost / entry["stdDev"].get<float>();
+                        ImGui::Text("%.2f", cost_per);
+
+                        // 添加材料按钮（显示"添加"，ID格式为"添加#唯一标识"）
+                        ImGui::TableSetColumnIndex(2);
+                        char add_btn_id[128];
+                        // 按钮ID格式："添加#add_mat_索引"，既保证唯一性又包含明确标识
+                        snprintf(add_btn_id, sizeof(add_btn_id), "添加##add_mat_%zu", idx);
+                        if (ImGui::Button(add_btn_id, ImVec2(-1, 0))) {
+                            temp_drops[item_id] = 1;
+                        }
+
+                        // 选择关卡按钮（显示"选择"，ID格式为"选择#唯一标识"）
+                        ImGui::TableSetColumnIndex(3);
+                        char select_btn_id[128];
+                        // 按钮ID格式："选择#sel_stage_索引"
+                        snprintf(select_btn_id, sizeof(select_btn_id), "选择##sel_stage_%zu", idx);
+                        if (ImGui::Button(select_btn_id, ImVec2(-1, 0))) {
+                            strncpy(stage_config.stage, stage_code.c_str(), STAGE_BUFFER_SIZE - 1);
+                        }
+
+                    }
+                    ImGui::EndTable();
+                }
+
+
+                // 底部按钮
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                if (ImGui::Button("确认设置##drops")) {
+                    stage_config.drops = temp_drops;
+                    initialized = false;
+                    drops_editor_open = false;
+                    checked_file = false;
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("取消##drops")) {
+                    initialized = false;
+                    drops_editor_open = false;
+                    checked_file = false;
+                }
+            }
+            ImGui::End();
+        }
+    }
     void draw_tags_editor() {
         if (!tags_editor_open) return;
 
@@ -1301,31 +2118,76 @@ public:
             ImGui::Spacing();
 
             draw_label("指定掉落");
-            if (ImGui::BeginTable("drops_table", 2, ImGuiTableFlags_Borders)) {
+            // 调整表格宽度，为新增列留出空间
+            ImGui::PushItemWidth(-300); // 预留足够空间给新列
+            if (ImGui::BeginTable("drops_table", 5, ImGuiTableFlags_Borders)) {
                 ImGui::TableSetupColumn("材料ID", ImGuiTableColumnFlags_WidthFixed, 80);
+                ImGui::TableSetupColumn("材料名称", ImGuiTableColumnFlags_WidthFixed, 120); // 新增材料名称列
                 ImGui::TableSetupColumn("数量", ImGuiTableColumnFlags_WidthFixed, 60);
+                ImGui::TableSetupColumn("调整", ImGuiTableColumnFlags_WidthFixed, 80); // 新增增减按钮列
+                ImGui::TableSetupColumn("操作", ImGuiTableColumnFlags_WidthFixed, 60); // 新增删除列
                 ImGui::TableHeadersRow();
 
                 if (stage_config.drops.empty()) {
                     ImGui::TableNextRow();
                     ImGui::TableSetColumnIndex(0);
                     ImGui::TextDisabled("无数据");
-                    ImGui::TableSetColumnIndex(1);
+                    // 合并空数据行的所有列
+                    ImGui::TableSetColumnIndex(4);
                     ImGui::TextDisabled("--");
                 }
                 else {
-                    for (const auto& [id, count] : stage_config.drops) {
+                    // 使用非const迭代器以便修改数量
+                    for (auto& [id, count] : stage_config.drops) {
                         ImGui::TableNextRow();
+
+                        // 材料ID
                         ImGui::TableSetColumnIndex(0);
                         ImGui::Text("%s", id.c_str());
+
+                        // 材料名称（从item_index查询）
                         ImGui::TableSetColumnIndex(1);
+                        const ItemInfo* item = find_item(id.c_str());
+                        if (item) {
+                            ImGui::Text("%s", item->name);
+                        }
+                        else {
+                            ImGui::TextDisabled("未知材料");
+                        }
+
+                        // 数量
+                        ImGui::TableSetColumnIndex(2);
                         ImGui::Text("%d", count);
+
+                        // 增减按钮
+                        ImGui::TableSetColumnIndex(3);
+                        char add_btn_id[64], sub_btn_id[64];
+                        snprintf(add_btn_id, sizeof(add_btn_id), "+##add_%s_main", id.c_str());
+                        snprintf(sub_btn_id, sizeof(sub_btn_id), "-##sub_%s_main", id.c_str());
+
+                        if (ImGui::Button(add_btn_id, ImVec2(30, 0))) {
+                            count++; // 增加数量
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button(sub_btn_id, ImVec2(30, 0)) && count > 1) {
+                            count--; // 减少数量，最少为1
+                        }
+
+                        // 删除按钮
+                        ImGui::TableSetColumnIndex(4);
+                        char del_btn_id[64];
+                        snprintf(del_btn_id, sizeof(del_btn_id), "删除##del_%s_main", id.c_str());
+                        if (ImGui::Button(del_btn_id, ImVec2(-1, 0))) {
+                            // 从map中删除该条目
+                            stage_config.drops.erase(id);
+                            // 由于修改了容器，需要打破循环重新绘制
+                            break;
+                        }
                     }
                 }
                 ImGui::EndTable();
             }
-            ImGui::SameLine();
-            if (ImGui::Button("选择材料##drops_btn")) {
+            if (ImGui::Button("选择材料##drops_btn", ImVec2(100, 0))) {
                 drops_editor_open = true;
             }
             ImGui::Spacing();
@@ -2692,36 +3554,8 @@ void RenderMainMenuState() {
 
                 // 单独启动肉鸽任务
                 ImGui::Separator();
-                if (ImGui::MenuItem("仅启动肉鸽任务")) {
-                    // 同样需要处理asstPtr的生命周期
-                    if (!asstPtr) {
-                        asstPtr = AsstCreate();
-                    }
-                    else {
-                        AsstStop(asstPtr);
-                        AsstDestroy(asstPtr);
-                        asstPtr = AsstCreate();
-                    }
-
-                    nlohmann::json j;
-
-                    // 启动模块配置
-                    j["startup"] = settings.startup_config;
-                    j["startup"]["enable"] = true;
-                    std::string startup_json = j["startup"].dump();
-                    AsstAppendTask(asstPtr, "StartUp", startup_json.c_str());
-
-                    // 肉鸽模块配置
-                    j["roguelike"] = settings.roguelike_config;
-                    j["roguelike"]["enable"] = true;
-                    std::string roguelike_json = j["roguelike"].dump();
-                    AsstAppendTask(asstPtr, "Roguelike", roguelike_json.c_str());
-
-                    g_currentState = STATE_RUNNING_TASK; // 切换到运行状态
-                    std::thread([]() {
-                        maa_loop();
-                        }).detach();
-
+                if (ImGui::MenuItem("自动作战")) {
+                    showAutoBattleWindow = true;
                 }
 
                 ImGui::EndMenu(); // 菜单结束
@@ -2746,6 +3580,9 @@ void RenderMainMenuState() {
     show_connection_status(status);
     show_task_chains(status);
     show_current_tasks_and_notifications(status);
+    if (showAutoBattleWindow) {
+        ShowAutoBattleWindow(&showAutoBattleWindow);
+    }
 }
 
 // 对话框样式窗口基础函数（兼容版本）
@@ -2980,6 +3817,8 @@ void draw_menu_bar(const AssistantStatus& status) {
         if (ImGui::BeginMenu("查看")) {
             if (ImGui::MenuItem("上一次任务链信息")) {
                 s_showTaskChains = true;
+
+                s_showNotifications = true;
             }
             if (ImGui::MenuItem("连接状态")) {
                 s_showConnectionStatus = true;
@@ -3139,6 +3978,13 @@ void RenderStoppingState() {
 // 初始化函数（带进度回调）
 void maa_initiating(std::function<void(float)> progressCallback) {
     g_taskError = "";
+    g_taskInfo = "正在查验显卡";
+    g_taskInfoEx = "";
+
+    int selected_gpu_index = select_best_gpu_adapter();
+    AsstSetStaticOption(2, std::to_string(selected_gpu_index).c_str());
+
+    g_taskError = "";
     g_taskInfo = "正在验证MAA基本资源";
     g_taskInfoEx = "";
     try {
@@ -3204,6 +4050,15 @@ void maa_initiating(std::function<void(float)> progressCallback) {
             exit(-1);
         }
     }
+
+    progressCallback(0.70f); // 更新进度
+
+    g_taskInfo = "正在加载数据...";
+    g_taskInfoEx = "";
+    g_taskError = "";
+    load_stages();
+    load_item_index();
+
     progressCallback(1.00f); // 更新进度
 }
 // 截图线程函数 - 仅获取数据，不处理D3D资源
@@ -3434,6 +4289,461 @@ void CleanupScreenshotResources() {
     g_textureHeight = 0;
 }
 
+
+
+// 辅助函数：显示干员信息
+void displayOperatorInfo(const json& op) {
+    ImGui::Text("干员: %s", op["name"].get<std::string>().c_str());
+
+    if (op.contains("skill") && !op["skill"].is_null()) {
+        ImGui::Text("技能: %d", op["skill"].get<int>());
+    }
+
+    if (op.contains("requirements") && !op["requirements"].is_null()) {
+        const json& req = op["requirements"];
+
+        if (req.contains("elite") && !req["elite"].is_null()) {
+            ImGui::Text("精英化: %d", req["elite"].get<int>());
+        }
+
+        if (req.contains("skill_level") && !req["skill_level"].is_null()) {
+            int level = req["skill_level"].get<int>();
+            std::string skillLevelStr;
+
+            if (level <= 7) {
+                skillLevelStr = std::to_string(level) + "级";
+            }
+            else if (level == 8) {
+                skillLevelStr = "专一";
+            }
+            else if (level == 9) {
+                skillLevelStr = "专二";
+            }
+            else if (level == 10) {
+                skillLevelStr = "专三";
+            }
+
+            ImGui::Text("技能等级: %s", skillLevelStr.c_str());
+        }
+
+        if (req.contains("module") && !req["module"].is_null()) {
+            int module = req["module"].get<int>();
+            std::string moduleStr;
+
+            if (module == -1) {
+                moduleStr = "无指定/无模组";
+            }
+            else {
+                moduleStr = "等级 " + std::to_string(module);
+            }
+
+            ImGui::Text("模组: %s", moduleStr.c_str());
+        }
+    }
+}
+
+// 辅助函数：生成干员列表项标题（修正格式）
+std::string getOperatorListItemText(const json& op) {
+    std::vector<std::string> parts;
+    parts.push_back(op["name"].get<std::string>()); // 干员名称
+
+    // 精英化信息
+    if (op.contains("requirements") && op["requirements"].contains("elite") && !op["requirements"]["elite"].is_null()) {
+        parts.push_back("精英" + std::to_string(op["requirements"]["elite"].get<int>()));
+    }
+
+    // 技能等级和技能信息
+    if (op.contains("skill") && !op["skill"].is_null()) {
+        int skillLevel = -1;
+        if (op.contains("requirements") && op["requirements"].contains("skill_level") && !op["requirements"]["skill_level"].is_null()) {
+            skillLevel = op["requirements"]["skill_level"].get<int>();
+        }
+
+        std::string skillLevelStr;
+        if (skillLevel != -1) {
+            if (skillLevel <= 7) {
+                skillLevelStr = std::to_string(skillLevel) + "级";
+            }
+            else if (skillLevel == 8) {
+                skillLevelStr = "专一";
+            }
+            else if (skillLevel == 9) {
+                skillLevelStr = "专二";
+            }
+            else if (skillLevel == 10) {
+                skillLevelStr = "专三";
+            }
+        }
+        else {
+            skillLevelStr = "未指定";
+        }
+        parts.push_back(skillLevelStr + std::to_string(op["skill"].get<int>()) + "技能");
+    }
+
+    // 模组信息
+    if (op.contains("requirements") && op["requirements"].contains("module") && !op["requirements"]["module"].is_null()) {
+        int module = op["requirements"]["module"].get<int>();
+        std::string moduleStr;
+        if (module == -1) {
+            moduleStr = "无指定模组";
+        }
+        else {
+            moduleStr = "模组" + std::to_string(module);
+        }
+        parts.push_back(moduleStr);
+    }
+
+    // 用逗号拼接所有部分
+    std::string text;
+    for (size_t i = 0; i < parts.size(); i++) {
+        if (i > 0) text += ",";
+        text += parts[i];
+    }
+    return text;
+}
+
+// 辅助函数：显示干员详细信息（补充信息）
+void displayOperatorInfoEx(const json& op) {
+    // 只显示额外的详细信息，不再重复显示标题中已有的内容
+    if (op.contains("skill_usage") && !op["skill_usage"].is_null()) {
+        ImGui::Text("技能使用次数: %d", op["skill_usage"].get<int>());
+    }
+}
+
+// 显示自动作战窗口的函数
+void ShowAutoBattleWindow(bool* p_open) {
+    if (!ImGui::Begin("自动作战", p_open, ImGuiWindowFlags_NoCollapse)) {
+        ImGui::End();
+        return;
+    }
+
+    // 神秘代码输入区域
+    ImGui::Text("神秘代码:");
+    ImGui::SameLine();
+    ImGui::InputText("##CodeInput", g_autoBattleState.codeInput, IM_ARRAYSIZE(g_autoBattleState.codeInput));
+    ImGui::SameLine();
+
+    if (ImGui::Button("查询")) {
+        // 清空本地文件路径
+        memset(g_autoBattleState.filePath, 0, sizeof(g_autoBattleState.filePath));
+
+        std::string code = g_autoBattleState.codeInput;
+        if (code.empty()) {
+            ImGui::OpenPopup("提示");
+            return;
+        }
+
+        // 检查是否为纯数字
+        if (!isAllDigits(code)) {
+            ImGui::OpenPopup("错误");
+            return;
+        }
+
+        // 下载文件
+        std::string url = "https://prts.maa.plus/copilot/get/" + code;
+        std::string tempInfoPath = "cache/temp_copilotinfo.json";
+
+        if (downloadFile(url, tempInfoPath)) {
+            // 读取并解析文件
+            std::ifstream infoFile(tempInfoPath);
+            if (infoFile.is_open()) {
+                try {
+                    json infoJson;
+                    infoFile >> infoJson;
+                    infoFile.close();
+
+                    if (infoJson.contains("status_code") && infoJson["status_code"] == 200 &&
+                        infoJson.contains("data")) {
+
+                        g_autoBattleState.copilotInfo = infoJson["data"];
+
+                        // 解析content字段
+                        if (g_autoBattleState.copilotInfo.contains("content")) {
+                            std::string content = g_autoBattleState.copilotInfo["content"].get<std::string>();
+                            g_autoBattleState.copilotContent = json::parse(content);
+
+                            // 保存到cache/temp_copilot.json
+                            std::string tempContentPath = "cache/temp_copilot.json";
+                            std::ofstream contentFile(tempContentPath);
+                            if (contentFile.is_open()) {
+                                contentFile << g_autoBattleState.copilotContent.dump(4);
+                                contentFile.close();
+
+                                // 填入本地文件输入框
+                                strcpy_s(g_autoBattleState.filePath, tempContentPath.c_str());
+                            }
+                        }
+
+                        g_autoBattleState.showDetails = true;
+                    }
+                    else {
+                        ImGui::OpenPopup("无效数据");
+                    }
+                }
+                catch (...) {
+                    ImGui::OpenPopup("解析错误");
+                }
+            }
+            else {
+                ImGui::OpenPopup("文件错误");
+            }
+        }
+        else {
+            ImGui::OpenPopup("下载失败");
+        }
+    }
+
+    // 分隔线
+    ImGui::Separator();
+
+    // 本地文件选择区域
+    ImGui::Text("本地文件:");
+    ImGui::SameLine();
+    ImGui::InputText("##FilePath", g_autoBattleState.filePath, IM_ARRAYSIZE(g_autoBattleState.filePath));
+    ImGui::SameLine();
+
+    if (ImGui::Button("选择")) {
+        // 清空神秘代码输入框
+        memset(g_autoBattleState.codeInput, 0, sizeof(g_autoBattleState.codeInput));
+
+        // 打开文件选择器
+        OPENFILENAMEA ofn;
+        char szFile[260] = { 0 };
+
+        ZeroMemory(&ofn, sizeof(ofn));
+        ofn.lStructSize = sizeof(ofn);
+        ofn.hwndOwner = NULL;
+        ofn.lpstrFile = szFile;
+        ofn.nMaxFile = sizeof(szFile);
+        ofn.lpstrFilter = "JSON Files (*.json)\0*.json\0All Files (*.*)\0*.*\0";
+        ofn.nFilterIndex = 1;
+        ofn.lpstrFileTitle = NULL;
+        ofn.nMaxFileTitle = 0;
+        ofn.lpstrInitialDir = NULL;
+        ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+        if (GetOpenFileNameA(&ofn) == TRUE) {
+            strcpy_s(g_autoBattleState.filePath, ofn.lpstrFile);
+
+            // 检查文件是否存在
+            if (fs::exists(g_autoBattleState.filePath)) {
+                // 尝试解析文件
+                try {
+                    std::ifstream file(g_autoBattleState.filePath);
+                    g_autoBattleState.copilotContent = json::parse(file);
+                    file.close();
+                    g_autoBattleState.showDetails = true;
+                    // 清空copilotInfo，因为这是本地文件
+                    g_autoBattleState.copilotInfo.clear();
+                }
+                catch (...) {
+                    ImGui::OpenPopup("文件解析错误");
+                }
+            }
+            else {
+                ImGui::OpenPopup("文件不存在");
+            }
+        }
+    }
+
+    // 显示详细信息
+    if (g_autoBattleState.showDetails) {
+        ImGui::Separator();
+
+        // 显示作业信息（如果有）
+        if (!g_autoBattleState.copilotInfo.empty()) {
+            if (g_autoBattleState.copilotInfo.contains("id")) {
+                ImGui::Text("作业ID: %d", g_autoBattleState.copilotInfo["id"].get<int>());
+            }
+
+            if (g_autoBattleState.copilotInfo.contains("upload_time")) {
+                ImGui::Text("上传时间: %s",
+                    g_autoBattleState.copilotInfo["upload_time"].get<std::string>().c_str());
+            }
+
+            if (g_autoBattleState.copilotInfo.contains("not_enough_rating") &&
+                !g_autoBattleState.copilotInfo["not_enough_rating"].get<bool>() &&
+                g_autoBattleState.copilotInfo.contains("rating_level")) {
+                ImGui::Text("评价: %d/10", g_autoBattleState.copilotInfo["rating_level"].get<int>());
+            }
+
+            ImGui::Separator();
+        }
+
+        // 显示content中的信息
+        if (g_autoBattleState.copilotContent.contains("doc")) {
+            if (g_autoBattleState.copilotContent["doc"].contains("title")) {
+                ImGui::Text("标题: %s",
+                    g_autoBattleState.copilotContent["doc"]["title"].get<std::string>().c_str());
+            }
+
+            if (g_autoBattleState.copilotContent["doc"].contains("details")) {
+                ImGui::Text("描述:");
+                ImGui::TextWrapped("%s",
+                    g_autoBattleState.copilotContent["doc"]["details"].get<std::string>().c_str());
+            }
+
+            ImGui::Separator();
+        }
+
+        // 显示groups
+        if (g_autoBattleState.copilotContent.contains("groups") &&
+            !g_autoBattleState.copilotContent["groups"].is_null()) {
+
+            const json& groups = g_autoBattleState.copilotContent["groups"];
+            if (!groups.empty()) {
+                ImGui::Text("干员分组:");
+
+                for (size_t i = 0; i < groups.size(); i++) {
+                    const json& group = groups[i];
+                    if (group.contains("name") && group.contains("opers")) {
+                        std::string groupName = group["name"].get<std::string>();
+
+                        if (ImGui::TreeNode(("分组 " + std::to_string(i + 1) + ": " + groupName).c_str())) {
+                            ImGui::Text("至少拥有分组中的其中一个干员");
+
+                            const json& opers = group["opers"];
+                            for (size_t j = 0; j < opers.size(); j++) {
+                                std::string opText = getOperatorListItemText(opers[j]);
+                                ImGui::Text("- %s", opText.c_str()); // 直接显示文本，无展开
+                            }
+
+                            ImGui::TreePop();
+                        }
+                    }
+                }
+
+                ImGui::Separator();
+            }
+        }
+
+        // 显示独立的opers
+        if (g_autoBattleState.copilotContent.contains("opers") &&
+            !g_autoBattleState.copilotContent["opers"].is_null()) {
+
+            // 独立干员列表（原树节点部分替换）
+            const json& opers = g_autoBattleState.copilotContent["opers"];
+            if (!opers.empty()) {
+                ImGui::Text("干员列表:");
+                for (size_t i = 0; i < opers.size(); i++) {
+                    std::string opText = getOperatorListItemText(opers[i]);
+                    ImGui::Text("- %s", opText.c_str()); // 直接显示文本，无展开
+                }
+                ImGui::Separator();
+            }
+        }
+
+        // 选项和执行按钮
+        ImGui::Checkbox("自动编队", &g_autoBattleState.autoFormation);
+        ImGui::Checkbox("忽略严格要求", &g_autoBattleState.ignoreRequirements);
+        ImGui::Checkbox("补充低信赖干员", &g_autoBattleState.addLowTrust);
+
+        if (ImGui::Button("执行")) {
+            // 生成JSON
+            json result;
+            result["enable"] = true;
+            result["formation"] = g_autoBattleState.autoFormation;
+            result["ignore_requirements"] = g_autoBattleState.ignoreRequirements;
+            result["add_trust"] = g_autoBattleState.addLowTrust;
+            result["filename"] = g_autoBattleState.filePath;
+            // 这里可以将result传递给其他部分
+            // 例如：SendToOtherModule(result);
+            // 正确处理asstPtr的生命周期
+            if (!asstPtr) {
+                asstPtr = AsstCreateEx(AsstCallbackHandler, c_arg);
+            }
+            else {
+                // 先停止再销毁，确保资源释放
+                AsstStop(asstPtr);
+                AsstDestroy(asstPtr);
+                asstPtr = AsstCreateEx(AsstCallbackHandler, c_arg);
+            }
+            AsstAppendTask(asstPtr, "Copilot", result.dump().c_str());
+            std::thread([]() {
+                maa_loop();
+                }).detach();
+            g_currentState = STATE_RUNNING_TASK;
+            //ImGui::OpenPopup("执行成功");
+        }
+    }
+
+    // 弹出提示框
+    if (ImGui::BeginPopup("提示")) {
+        ImGui::Text("请输入神秘代码");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("错误")) {
+        ImGui::Text("神秘代码必须为纯数字");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("无效数据")) {
+        ImGui::Text("获取的数据无效");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("解析错误")) {
+        ImGui::Text("解析数据失败");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("文件错误")) {
+        ImGui::Text("无法打开文件");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("下载失败")) {
+        ImGui::Text("下载文件失败");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("文件不存在")) {
+        ImGui::Text("所选文件不存在");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("文件解析错误")) {
+        ImGui::Text("解析文件失败");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("执行成功")) {
+        ImGui::Text("执行参数已生成");
+        if (ImGui::Button("确定")) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::End();
+}
+
+
 // 第二段任务（返回是否成功）
 bool maa_loop() {
     // 检查asstPtr是否有效
@@ -3663,7 +4973,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Create application window
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"RSS", nullptr };
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"RSF|1.60.0.beta4|MAAv5.21.0", WS_OVERLAPPEDWINDOW, 100, 100, (int)(950), (int)(540), nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"RSF|1.60.0|MAA 51a0732|AVX2", WS_OVERLAPPEDWINDOW, 100, 100, (int)(950), (int)(540), nullptr, nullptr, wc.hInstance, nullptr);
 
     // Initialize Direct3D
     if (!CreateDeviceD3D(hwnd))
@@ -3705,9 +5015,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // 在WinMain的初始化部分添加（在加载背景后）
     // 启动初始化线程
-
-    int selected_gpu_index = select_best_gpu_adapter();
-    AsstSetStaticOption(2, std::to_string(selected_gpu_index).c_str());
     std::thread([]() {
         // 这里执行你的第一段初始化代码
         maa_initiating([](float progress) {
@@ -3762,21 +5069,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
             static float f = 0.0f;
             static int counter = 0;
 
-            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
+            ImGui::Begin("关于");                          // Create a window called "Hello, world!" and append into it.
 
-            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-            ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-            ImGui::Checkbox("Another Window", &show_another_window);
+            ImGui::Text("欢迎使用RSF,在beta模式下RSF的关于窗口不会关闭。");               // Display some text (you can use a format strings too)
+            ImGui::Checkbox("示例与Debug", &show_demo_window);      // Edit bools storing our window open/close state
+            ImGui::Checkbox("RS:uMAA", &show_another_window);
 
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
+            ImGui::SliderFloat("示例浮点数滑条", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::ColorEdit3("取色器", (float*)&clear_color); // Edit 3 floats representing a color
 
-            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
+            if (ImGui::Button("点我计数增加"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;
             ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
+            ImGui::Text("计数器 = %d", counter);
 
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+            ImGui::Text("渲染帧速度 %.3f ms/每帧 (对应%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+            ImGui::Text("");
+            ImGui::Text("工程仓库:https://github.com/THSLP13/RSF_uniMAA");
+            ImGui::Text("工程上游仓库:https://github.com/MaaAssistantArknights/MaaAssistantArknights");
+            ImGui::Text("工程上游代码来自MaaAssistantArknights,由MAA Team管理");
+            ImGui::Text("本工程利用上游代码重新修改再编译，以AGPL-3.0协议发布并免费开源");
+            ImGui::Text("截至该副本版本仓库由Eliata(@THSLP13)维护");
+            ImGui::Text("编译信息:");
+            ImGui::Text("__cplusplus:%d", __cplusplus);
+            ImGui::Text("__DATE__:%s", __DATE__);
+            ImGui::Text("__TIME__:%s", __TIME__);
+            ImGui::Text("__FILE__:%s", __FILE__);
+            ImGui::Text("__LINE__:%d", __LINE__);
+            ImGui::Text("__STDC__:%d", 0);
+            ImGui::Text("__STDC_VERSION__ :%d", 0);
+            ImGui::Text("__STDCPP_THREADS__:%d", __STDCPP_THREADS__);
+            ImGui::Text("__AVX__:%d", __AVX__);
+            ImGui::Text("__AVX2__:%d", __AVX2__);
+            ImGui::Text("_CPPUNWIND:%d", _CPPUNWIND);
+            ImGui::Text("_MSC_FULL_VER:%d", _MSC_FULL_VER);
+            ImGui::Text("_MSVC_LANG:%d", _MSVC_LANG);
+            ImGui::Text("_MT:%d", _MT);
             ImGui::End();
         }
 

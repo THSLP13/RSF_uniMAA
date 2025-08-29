@@ -20,6 +20,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -37,6 +38,7 @@ using MaaWpfGui.Models;
 using MaaWpfGui.Models.AsstTasks;
 using MaaWpfGui.Services;
 using MaaWpfGui.Services.Notification;
+using MaaWpfGui.Services.Web;
 using MaaWpfGui.States;
 using MaaWpfGui.ViewModels.UI;
 using MaaWpfGui.ViewModels.UserControl.TaskQueue;
@@ -572,6 +574,10 @@ namespace MaaWpfGui.Main
                 case AsstMsg.SubTaskStopped:
                     break;
 
+                case AsstMsg.ReportRequest:
+                    _ = ProcReportRequest(details);
+                    break;
+
                 default:
                     throw new ArgumentOutOfRangeException(nameof(msg), msg, null);
             }
@@ -845,23 +851,27 @@ namespace MaaWpfGui.Main
                 case AsstMsg.TaskChainStopped:
                     Instances.TaskQueueViewModel.SetStopped();
                     TaskStatusUpdate(taskId, TaskStatus.Completed);
-                    if (isCopilotTaskChain)
-                    {
-                        _runningState.SetIdle(true);
-                    }
-
+                    _tasksStatus.Clear();
                     break;
 
                 case AsstMsg.TaskChainError:
                     {
                         // 对剿灭的特殊处理，如果刷完了剿灭还选了剿灭会因为找不到入口报错
+                        TaskStatusUpdate(taskId, TaskStatus.Completed);
                         _tasksStatus.TryGetValue(taskId, out var value);
-                        if (value is { Type: TaskType.Fight } && (TaskQueueViewModel.FightTask.Stage == "Annihilation"))
+                        if (value is { Type: TaskType.Fight } &&
+                            TaskQueueViewModel.FightTask.Stage == "Annihilation" &&
+                            TaskQueueViewModel.FightTask.UseAlternateStage &&
+                            TaskQueueViewModel.FightTask.Stages.Any(stage =>
+                                Instances.TaskQueueViewModel.IsStageOpen(stage ?? string.Empty) &&
+                                stage != "Annihilation"))
                         {
-                            if (TaskQueueViewModel.FightTask.Stages.Any(stage => Instances.TaskQueueViewModel.IsStageOpen(stage ?? string.Empty) && (stage != "Annihilation")))
-                            {
-                                Instances.TaskQueueViewModel.AddLog(LocalizationHelper.GetString("AnnihilationTaskFailed"), UiLogColor.Warning);
-                            }
+                            Instances.TaskQueueViewModel.AddLog(LocalizationHelper.GetString("AnnihilationTaskFailed"), UiLogColor.Warning);
+                        }
+                        else if (value is { Type: TaskType.Copilot } or { Type: TaskType.VideoRec })
+                        {
+                            Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("CombatError"), UiLogColor.Error);
+                            AchievementTrackerHelper.Instance.Unlock(AchievementIds.CopilotError);
                         }
                         else
                         {
@@ -873,23 +883,6 @@ namespace MaaWpfGui.Main
                             {
                                 ExternalNotificationService.Send(log, log);
                             }
-                        }
-
-                        if (isCopilotTaskChain)
-                        {
-                            // 如果启用战斗列表，需要中止掉剩余的任务
-                            if (Instances.CopilotViewModel.UseCopilotList)
-                            {
-                                if (!AsstStop(false))
-                                {
-                                    _logger.Warning("Failed to stop Asst");
-                                }
-                            }
-
-                            _runningState.SetIdle(true);
-                            Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("CombatError"), UiLogColor.Error);
-                            TaskStatusUpdate(taskId, TaskStatus.Completed);
-                            AchievementTrackerHelper.Instance.Unlock(AchievementIds.CopilotError);
                         }
 
                         break;
@@ -934,17 +927,6 @@ namespace MaaWpfGui.Main
 
                         if (isCopilotTaskChain)
                         {
-                            if (!Instances.CopilotViewModel.UseCopilotList || Instances.CopilotViewModel.CopilotItemViewModels.All(model => !model.IsChecked))
-                            {
-                                _runningState.SetIdle(true);
-                            }
-
-                            if (Instances.CopilotViewModel.UseCopilotList)
-                            {
-                                Instances.CopilotViewModel.CopilotTaskSuccess();
-                            }
-
-                            Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("CompleteCombat"), UiLogColor.Info);
                             AchievementTrackerHelper.Instance.AddProgressToGroup(AchievementIds.UseCopilotGroup);
                         }
 
@@ -1246,22 +1228,37 @@ namespace MaaWpfGui.Main
                         var why = details.TryGetValue("why", out var whyObj) ? whyObj.ToString() : string.Empty;
                         if (why == "OperatorMissing")
                         {
-                            var missingOpers = details["details"]?["opers"]?.ToObject<List<List<string>>>();
-                            if (missingOpers is not null)
+                            var missingOpers = details["details"]?["opers"]?.ToObject<Dictionary<string, JArray>>();
+                            if (missingOpers is not null && missingOpers.Count > 0)
                             {
-                                var missingOpersStr = "[" + string.Join("]; [", missingOpers.Select(opers =>
-                                    string.Join(", ", opers.Select(oper => DataHelper.GetLocalizedCharacterName(oper))))) + "]";
-                                Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("MissingOperators") + missingOpersStr, UiLogColor.Error);
+                                var str = new StringBuilder();
+                                str.AppendLine();
+                                foreach (var (groupName, opers) in missingOpers)
+                                {
+                                    if (opers.Count == 1)
+                                    {
+                                        str.AppendLine($"{groupName}");
+                                        continue;
+                                    }
+                                    else
+                                    {
+                                        var operList = opers.Cast<dynamic>().ToList(); // 确保 opers 是动态类型
+                                        str.AppendLine($"{groupName}=> {string.Join(" / ", operList.Select(i => i.name).ToList())}");
+                                    }
+                                }
+
+                                Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("MissingOperators") + str.ToString().TrimEnd('\n'), UiLogColor.Error);
                             }
                             else
                             {
                                 Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("MissingOperators"), UiLogColor.Error);
                             }
 
+                            /*
                             if (missingOpers is not null && missingOpers.Count >= 2)
                             {
                                 AchievementTrackerHelper.Instance.Unlock(AchievementIds.Irreplaceable);
-                            }
+                            }*/
                         }
 
                         break;
@@ -1409,6 +1406,14 @@ namespace MaaWpfGui.Main
                                 Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("MissionStart"), UiLogColor.Info);
                                 break;
 
+                            case "StageDrops-Stars-3":
+                            case "StageDrops-Stars-Adverse":
+                                {
+                                    Instances.CopilotViewModel.CopilotTaskSuccess();
+                                    Instances.CopilotViewModel.AddLog(LocalizationHelper.GetString("CompleteCombat"), UiLogColor.Info);
+                                    break;
+                                }
+
                             case "StageTraderSpecialShoppingAfterRefresh":
                                 Instances.TaskQueueViewModel.AddLog(LocalizationHelper.GetString("RoguelikeSpecialItemBought"), UiLogColor.RareOperator);
                                 break;
@@ -1524,6 +1529,7 @@ namespace MaaWpfGui.Main
                             if (itemName == "furni")
                             {
                                 itemName = LocalizationHelper.GetString("FurnitureDrop");
+                                itemId = "3401";
                             }
 
                             int totalQuantity = (int)(item["quantity"] ?? -1);
@@ -1537,10 +1543,10 @@ namespace MaaWpfGui.Main
 
                         foreach (var (_, itemName, totalQuantity, addQuantity) in drops)
                         {
-                            allDrops += $"{itemName} : {totalQuantity:#,#}";
+                            allDrops += $"{itemName} : {totalQuantity.FormatNumber(false)}";
                             if (addQuantity > 0)
                             {
-                                allDrops += $" (+{addQuantity:#,#})";
+                                allDrops += $" (+{addQuantity.FormatNumber(false)})";
                             }
 
                             allDrops += "\n";
@@ -1719,14 +1725,6 @@ namespace MaaWpfGui.Main
                     Instances.TaskQueueViewModel.AddLog(LocalizationHelper.GetString("StageInfoError"), UiLogColor.Error);
                     break;
 
-                case "PenguinId":
-                    {
-                        string id = subTaskDetails!["id"]?.ToString() ?? string.Empty;
-                        SettingsViewModel.GameSettings.PenguinId = id;
-
-                        break;
-                    }
-
                 case "BattleFormation":
                     Instances.CopilotViewModel.AddLog(
                         LocalizationHelper.GetString("BattleFormation") +
@@ -1754,7 +1752,11 @@ namespace MaaWpfGui.Main
                 case "BattleFormationOperUnavailable":
                     {
                         var oper_name = DataHelper.GetLocalizedCharacterName(subTaskDetails!["oper_name"]?.ToString());
-                        Instances.CopilotViewModel.AddLog(string.Format(LocalizationHelper.GetString("BattleFormationOperUnavailable"), oper_name, subTaskDetails["requirement_type"]), Instances.CopilotViewModel.IgnoreRequirements ? UiLogColor.Warning : UiLogColor.Error);
+                        var requirement_type = subTaskDetails["requirement_type"]?.ToString() == "module"
+                            ? LocalizationHelper.GetString("BattleFormationModuleUnavailable")
+                            : subTaskDetails["requirement_type"]?.ToString() ?? "UnknownRequirementType";
+
+                        Instances.CopilotViewModel.AddLog(string.Format(LocalizationHelper.GetString("BattleFormationOperUnavailable"), oper_name, requirement_type), Instances.CopilotViewModel.IgnoreRequirements ? UiLogColor.Warning : UiLogColor.Error);
                         break;
                     }
 
@@ -1768,10 +1770,12 @@ namespace MaaWpfGui.Main
                         }
 
                         var target = subTaskDetails["target"]?.ToString();
+                        var actionToken = subTaskDetails?["action"];
+                        var actionString = actionToken?.ToString() ?? "UnknownAction";
                         Instances.CopilotViewModel.AddLog(
                             string.Format(
                                 LocalizationHelper.GetString("CurrentSteps"),
-                                subTaskDetails["action"],
+                                LocalizationHelper.GetString(actionString),
                                 DataHelper.GetLocalizedCharacterName(target) ?? target));
 
                         break;
@@ -1782,7 +1786,7 @@ namespace MaaWpfGui.Main
                     break;
 
                 case "SSSStage":
-                    Instances.CopilotViewModel.AddLog("CurrentStage: " + subTaskDetails!["stage"], UiLogColor.Info);
+                    Instances.CopilotViewModel.AddLog(string.Format(LocalizationHelper.GetString("CurrentStage"), subTaskDetails!["stage"]), UiLogColor.Info);
                     break;
 
                 case "SSSSettlement":
@@ -1890,7 +1894,7 @@ namespace MaaWpfGui.Main
                                 AchievementTrackerHelper.Instance.SetProgress(AchievementIds.OverLimitAgent, FightTask.FightReport.TimesFinished);
                             }
 
-                            if (Instances.TaskQueueViewModel.FightTaskRunning && FightTask.Instance.HasTimesLimited && FightTask.FightReport.TimesFinished + FightTask.FightReport.Series > FightTask.Instance.MaxTimes)
+                            if (Instances.TaskQueueViewModel.FightTaskRunning && FightTask.Instance.HasTimesLimited != false && FightTask.FightReport.TimesFinished + FightTask.FightReport.Series > FightTask.Instance.MaxTimes)
                             {
                                 Instances.TaskQueueViewModel.AddLog(string.Format(LocalizationHelper.GetString("FightTimesUnused"), FightTask.FightReport.TimesFinished, FightTask.FightReport.Series, FightTask.FightReport.TimesFinished + FightTask.FightReport.Series, FightTask.Instance.MaxTimes), UiLogColor.Error);
                             }
@@ -1967,6 +1971,56 @@ namespace MaaWpfGui.Main
                     };
                     Process.Start(info);
                     break;
+            }
+        }
+
+        private static async Task ProcReportRequest(JObject details)
+        {
+            string? url = (string?)details["url"];
+            if (string.IsNullOrEmpty(url))
+            {
+                _logger.Error("Report request received with empty URL.");
+                return;
+            }
+
+            var headersToken = details["headers"];
+            Dictionary<string, string> headers = [];
+            if (headersToken is JObject headersObj)
+            {
+                foreach (var prop in headersObj.Properties())
+                {
+                    headers[prop.Name] = prop.Value.ToString();
+                }
+            }
+
+            string? body = (string?)details["body"];
+            if (string.IsNullOrEmpty(body))
+            {
+                _logger.Error("Report request received with empty body.");
+                return;
+            }
+
+            var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+            string subTask = details["subtask"]?.ToString() ?? string.Empty;
+
+            bool success = false;
+            try
+            {
+                success = await GameDataReportService.PostWithRetryAsync(url, content, headers, subTask, penguinId =>
+                {
+                    SettingsViewModel.GameSettings.PenguinId = penguinId;
+                    _logger.Information("New PenguinId got: {PenguinId}", penguinId);
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.Warning(ex, "Failed to report: {Url}", url);
+            }
+
+            if (!success)
+            {
+                Instances.TaskQueueViewModel.AddLog("Failed to report, " + LocalizationHelper.GetString("GiveUpUploadingPenguins"), UiLogColor.Warning);
             }
         }
 
@@ -2195,27 +2249,63 @@ namespace MaaWpfGui.Main
             return AsstSetTaskParams(_handle, id, JsonConvert.SerializeObject(taskParams));
         }
 
-        [SuppressMessage("ReSharper", "UnusedMember.Local")]
         public enum TaskType
         {
+            /// <summary>开始唤醒</summary>
             StartUp,
+
+            /// <summary>关闭游戏</summary>
             CloseDown,
+
+            /// <summary>刷理智</summary>
             Fight,
+
+            /// <summary>关卡选择为剿灭时的备选刷理智</summary>
             FightAnnihilationAlternate,
+
+            /// <summary>剩余理智</summary>
             FightRemainingSanity,
+
+            /// <summary>自动公招</summary>
             Recruit,
+
+            /// <summary>基建</summary>
             Infrast,
+
+            /// <summary>获取信用点/访问好友/信用商店</summary>
             Mall,
+
+            /// <summary>领奖励/邮箱/幸运墙等</summary>
             Award,
+
+            /// <summary>自动肉鸽</summary>
             Roguelike,
+
+            /// <summary>公招识别</summary>
             RecruitCalc,
+
+            /// <summary>自动战斗</summary>
             Copilot,
+
+            /// <summary>视频识别（真有人用吗）</summary>
             VideoRec,
+
+            /// <summary>仓库识别</summary>
             Depot,
+
+            /// <summary>干员识别</summary>
             OperBox,
+
+            /// <summary>抽卡</summary>
             Gacha,
+
+            /// <summary>生息演算</summary>
             Reclamation,
+
+            /// <summary>小游戏</summary>
             MiniGame,
+
+            /// <summary>自定义任务s</summary>
             Custom,
         }
 
@@ -2416,17 +2506,10 @@ namespace MaaWpfGui.Main
         /// <summary>
         /// 停止。
         /// </summary>
-        /// <param name="clearTask">是否清理_latestTaskId</param>
         /// <returns>是否成功。</returns>
-        public bool AsstStop(bool clearTask = true)
+        public bool AsstStop()
         {
-            bool ret = MaaService.AsstStop(_handle);
-            if (clearTask)
-            {
-                _tasksStatus.Clear();
-            }
-
-            return ret;
+            return MaaService.AsstStop(_handle);
         }
 
         /// <summary>
@@ -2529,6 +2612,11 @@ namespace MaaWpfGui.Main
         /// 原子任务手动停止
         /// </summary>
         SubTaskStopped,
+
+        /// <summary>
+        /// 上报请求
+        /// </summary>
+        ReportRequest = 30000,
     }
 
     /// <summary>

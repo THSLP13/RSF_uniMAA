@@ -181,7 +181,7 @@ namespace MaaWpfGui.Services
             //    SemVersionStyles.AllowLowerV, out var curResourceVersionObj);
             var resourceCollection = InitializeResourceCollection(activity?[clientType]?["resourceCollection"]);
 
-            if (activity?[clientType] != null)
+            if (activity?[clientType] != null && (isDebugVersion || (curVerParsed && curVersionObj != null)))
             {
                 ParseActivityStages(activity[clientType], tempStage, curVerParsed, curVersionObj, isDebugVersion);
             }
@@ -205,7 +205,7 @@ namespace MaaWpfGui.Services
             };
         }
 
-        private static bool TryParseVersion(string? version, out SemVersion versionObj)
+        private static bool TryParseVersion(string? version, out SemVersion? versionObj)
         {
             return SemVersion.TryParse(version, SemVersionStyles.AllowLowerV, out versionObj);
         }
@@ -233,7 +233,7 @@ namespace MaaWpfGui.Services
             };
         }
 
-        private static void ParseActivityStages(JToken? clientData, Dictionary<string, StageInfo> tempStage, bool curVerParsed, SemVersion curVersionObj, bool isDebugVersion)
+        private static void ParseActivityStages(JToken? clientData, Dictionary<string, StageInfo> tempStage, bool curVerParsed, SemVersion? curVersionObj, bool isDebugVersion)
         {
             try
             {
@@ -244,7 +244,7 @@ namespace MaaWpfGui.Services
                         continue;
                     }
 
-                    bool unsupportedStages = !isDebugVersion && curVerParsed && curVersionObj.CompareSortOrderTo(minRequiredObj) < 0;
+                    bool unsupportedStages = !isDebugVersion && curVerParsed && curVersionObj!.CompareSortOrderTo(minRequiredObj) < 0;
 
                     var stageInfo = CreateStageInfo(stageObj, unsupportedStages, minRequiredObj);
                     tempStage.TryAdd(stageInfo.Display, stageInfo);

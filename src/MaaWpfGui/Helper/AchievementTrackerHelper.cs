@@ -23,13 +23,13 @@ using HandyControl.Controls;
 using HandyControl.Data;
 using HandyControl.Tools.Command;
 using MaaWpfGui.Constants;
+using MaaWpfGui.Constants.Enums;
 using MaaWpfGui.Extensions;
 using MaaWpfGui.Models;
 using MaaWpfGui.ViewModels.UI;
 using MaaWpfGui.ViewModels.UserControl.Settings;
 using Newtonsoft.Json.Linq;
 using Stylet;
-using static MaaWpfGui.Constants.Enums;
 
 namespace MaaWpfGui.Helper
 {
@@ -171,7 +171,7 @@ namespace MaaWpfGui.Helper
         private static string GetGroupPrefix(string id)
         {
             // 例如 SanitySpender1 => SanitySpender
-            return new(id.TakeWhile(char.IsLetter).ToArray());
+            return new([.. id.TakeWhile(char.IsLetter)]);
         }
 
         public void Unlock(string id, bool staysOpen = true)
@@ -572,8 +572,10 @@ namespace MaaWpfGui.Helper
             public static void Startup()
             {
                 Instance.Unlock(AchievementIds.FirstLaunch);
-                if ((DateTime.UtcNow - VersionUpdateSettingsUserControlModel.BuildDateTime).TotalDays > 90 ||
-                    (DateTime.UtcNow - SettingsViewModel.VersionUpdateSettings.ResourceDateTime).TotalDays > 90)
+                var buildTimeInterval = (DateTime.UtcNow - VersionUpdateSettingsUserControlModel.BuildDateTime).TotalDays;
+                var resourceTimeInterval = (DateTime.UtcNow - SettingsViewModel.VersionUpdateSettings.ResourceDateTime).TotalDays;
+                var maxTimeInterval = Math.Max(buildTimeInterval, resourceTimeInterval);
+                if (maxTimeInterval > 90)
                 {
                     Instance.Unlock(AchievementIds.Martian);
                 }
@@ -586,7 +588,9 @@ namespace MaaWpfGui.Helper
                 {
                     Instance.Unlock(AchievementIds.Pioneer1);
                 }
-                else if (!Instances.VersionUpdateViewModel.IsStdVersion()) // 内测版要传入 SemVersion 判断，这里就取反判断了
+
+                // 内测版要传入 SemVersion 判断，这里就取反判断了
+                else if (!Instances.VersionUpdateViewModel.IsStdVersion())
                 {
                     Instance.Unlock(AchievementIds.Pioneer2);
                 }
