@@ -1,5 +1,5 @@
 # RSF_uniMAA 
-<img width="936" height="533" alt="QQ_1755183829642" src="https://github.com/user-attachments/assets/34321723-5abc-4273-85f9-be932442091c" />
+<img width="654" height="567" alt="QQ_1766123723830" src="https://github.com/user-attachments/assets/bbeb7738-ddf4-4454-b036-e374dfbb3051" />
 <!-- markdownlint-disable -->
 <div>
     <img alt="C++" src="https://img.shields.io/badge/C++-20-%2300599C?logo=cplusplus">
@@ -21,6 +21,7 @@
 A RSS GUI to replace MAA .NET GUI.  
 该工程源自于 https://github.com/MaaAssistantArknights/MaaAssistantArknights  
 使用C++20与C17 与 imgui 1.92一同构建的基于DX11的用户界面用以替换MAA的.NET GUI  
+自从1.80开始，ryuni将使用标签样式进行对maa实例的管理
 
 ## 该工程隶属Riva Scripting System
 该工程源代码继承于MAA Team管辖的MaaAssistantArknights仓库，且RSF通过AGPL-3.0协议使用MaaAssistantArknights的源代码修改并重新制作软件  
