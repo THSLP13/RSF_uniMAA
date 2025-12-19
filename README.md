@@ -8,12 +8,12 @@
     <img alt="platform" src="https://img.shields.io/badge/platform-Windows-blueviolet">
 </div>
 <div>
-    <img alt="license" src="https://img.shields.io/github/license/THSLP13/RSF_uniMAA">
-    <img alt="commit" src="https://img.shields.io/github/commit-activity/m/THSLP13/RSF_uniMAA?color=%23ff69b4">
+    <img alt="license" src="https://img.shields.io/github/license/THSLP13/ryuniGuiForMAA">
+    <img alt="commit" src="https://img.shields.io/github/commit-activity/m/THSLP13/ryuniGuiForMAA?color=%23ff69b4">
 </div>
 <div>
-    <img alt="stars" src="https://img.shields.io/github/stars/THSLP13/RSF_uniMAA?style=social">
-    <img alt="GitHub all releases" src="https://img.shields.io/github/downloads/THSLP13/RSF_uniMAA/total?style=social">
+    <img alt="stars" src="https://img.shields.io/github/stars/THSLP13/ryuniGuiForMAA?style=social">
+    <img alt="GitHub all releases" src="https://img.shields.io/github/downloads/THSLP13/ryuniGuiForMAA/total?style=social">
 </div>
 <br>
 <!-- markdownlint-restore -->
@@ -27,9 +27,8 @@ A RSS GUI to replace MAA .NET GUI.
 RSF不会使用代码本身进行盈利，但使用RSF制作的软件提供的服务可能由于提供服务的设备所需的成本以及提供服务的人而收费  
 代码将在关于部分提及与上游代码的继承关系，且不会宣称（下述的）Eliata为MAA Team的任何成员，Eliata也没有与MAA Team有合作关系.
   
-该工程使用到的RSS模块:RSF/RP  
 该工程使用了nlohmann json与Dear ImGUI  
-该工程使用MSVC进行编译  
+该工程使用Cmake进行编译  
 
 ## 注意事项
 该仓库直到1.60.0才首次上云，先前的更新记录已不可考  
@@ -38,9 +37,8 @@ RSF不会使用代码本身进行盈利，但使用RSF制作的软件提供的�
 ## RSF版权信息
 本软件以AGPL 3.0协议继承上游代码并开源  
 源仓库为 MaaAssistantArknights  
-rsfFamily,a porting project series.  
 This is a MAA 3rd party GUI rebuild.  
-This project is previously by Eliata(a.k.a. @THSLP13)/Mukouchi/eXmoonlight/VeXs3/eDebr1s 2024-2025.  
+This project is previously by Eliata(a.k.a. @THSLP13) 2024-2025.  
 Now by Eliata(a.k.a. @THSLP13) since 2025.8.  
   
 The project is compiled with... MSVC 10.0.26100(C++ 20,C 17)(/MTd /utf-8)  
