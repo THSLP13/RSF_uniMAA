@@ -1,0 +1,39 @@
+// version.rc - 定义可执行文件的版本和版权信息
+#include <windows.h>
+#include "resid.h"
+
+IDR_CHARA_ORG RCDATA "character.txt"
+IDR_CHARA_CN RCDATA "character_cn.txt"
+    // 版本信息结构（固定格式）
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     1,80,0,01       // 文件版本号（主版本,次版本,修订号,构建号）
+ PRODUCTVERSION  1,80,0,0       // 产品版本号
+ FILEFLAGSMASK   0x3fL
+#ifdef _DEBUG
+ FILEFLAGS       0x1L          // 调试版本
+#else
+ FILEFLAGS       0x0L          // 发布版本
+#endif
+ FILEOS          0x40004L      // 操作系统：Windows NT
+ FILETYPE        0x1L          // 文件类型：应用程序
+ FILESUBTYPE     0x0L          // 子类型：无
+
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"  // 语言代码（0409=英语，0804=中文；04b0=Unicode）
+        BEGIN
+            VALUE "FileDescription",  "Ryuni GUI for MAA"             // 文件描述
+            VALUE "FileVersion",      "1.80.0.01"                  // 文件版本
+            VALUE "InternalName",     "ryuni64"               // 内部名称（通常与目标名一致）
+            VALUE "LegalCopyright",   "(C)2017-2025 _4eliata"  // 版权信息
+            VALUE "OriginalFilename", "ryuniD2R64.exe"           // 原始文件名
+            VALUE "ProductName",      "ryuniGui"             // 产品名称
+            VALUE "ProductVersion",   "1.80.0.0"                  // 产品版本
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200  // 对应上面的语言代码（0409=英语，1200=Unicode）
+    END
+END
