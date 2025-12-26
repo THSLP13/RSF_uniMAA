@@ -1,9 +1,0 @@
-{
-    "LE-Open": {
-        "text": ["Lingering Echoes", "Lingering", "Echoes"]
-    },
-    "LEChapterToLE": {
-        "ocrReplace": [["AFTERGLOW.*", "AFTERGLOW"]],
-        "text": ["AFTERGLOW"]
-    }
-}
