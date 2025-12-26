@@ -1,8 +1,0 @@
-module MaaCore {
-    umbrella header "AsstCaller.h"
-    export *
-    link framework "Accelerate"
-    link framework "OpenCL"
-    link framework "Vision"
-    link "c++"
-}
